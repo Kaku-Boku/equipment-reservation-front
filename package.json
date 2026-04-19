@@ -14,9 +14,12 @@
   },
   "dependencies": {
     "@astrojs/cloudflare": "^13.1.10",
+    "@supabase/ssr": "^0.10.2",
     "@supabase/supabase-js": "^2.103.3",
+    "@tailwindcss/vite": "^4.2.2",
     "astro": "^6.1.8",
     "googleapis": "^171.4.0",
+    "tailwindcss": "^4.2.2",
     "wrangler": "^4.83.0"
   },
   "overrides": {
