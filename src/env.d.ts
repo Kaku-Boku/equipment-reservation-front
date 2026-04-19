@@ -6,6 +6,10 @@ import type { SupabaseClient, Session } from '@supabase/supabase-js';
 interface ImportMetaEnv {
   readonly PUBLIC_SUPABASE_URL: string;
   readonly PUBLIC_SUPABASE_PUBLISHABLE_KEY: string;
+  /** Google OAuth Client ID（サーバーサイドのみ使用） */
+  readonly GOOGLE_CLIENT_ID: string;
+  /** Google OAuth Client Secret（サーバーサイドのみ使用） */
+  readonly GOOGLE_CLIENT_SECRET: string;
 }
 
 interface ImportMeta {

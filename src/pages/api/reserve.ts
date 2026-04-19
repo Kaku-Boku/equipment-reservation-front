@@ -7,9 +7,13 @@
  *
  * DB側のEXCLUDE制約による時間重複エラーをハンドリングし、
  * クライアントに分かりやすいエラーメッセージを返す。
+ *
+ * Googleカレンダー同期を予約操作後に実行する。
+ * 同期失敗は予約操作自体をブロックしない（警告のみ）。
  */
 import type { APIRoute } from 'astro';
 import { syncWithGoogleCalendar } from '../../lib/google-calendar';
+import type { CalendarSyncData } from '../../lib/google-calendar';
 
 /**
  * EXCLUDE制約違反エラーかどうかを判定
@@ -17,6 +21,23 @@ import { syncWithGoogleCalendar } from '../../lib/google-calendar';
  */
 function isExclusionViolation(error: any): boolean {
   return error?.code === '23P01' || error?.message?.includes('conflicting key value violates exclusion constraint');
+}
+
+/**
+ * 参加者IDリストからメールアドレスを取得
+ */
+async function getParticipantEmails(
+  supabase: any,
+  participantIds: string[]
+): Promise<string[]> {
+  if (!participantIds || participantIds.length === 0) return [];
+
+  const { data } = await supabase
+    .from('members')
+    .select('email')
+    .in('id', participantIds);
+
+  return (data || []).map((m: any) => m.email);
 }
 
 /**
@@ -98,23 +119,32 @@ export const POST: APIRoute = async ({ request, locals }) => {
       }
     }
 
-    // Googleカレンダー同期（ダミー）
+    // Googleカレンダー同期
     const { data: facility } = await supabase
       .from('facilities')
       .select('name')
       .eq('id', facility_id)
       .single();
 
-    await syncWithGoogleCalendar('create', {
+    const participantEmails = await getParticipantEmails(supabase, participant_ids || []);
+
+    const syncData: CalendarSyncData = {
       reservationId: reservation.id,
       facilityName: facility?.name || '',
       startTime: start_time,
       endTime: end_time,
-      purpose,
-      memo,
-      notice,
-      participants: participant_ids,
-    });
+      purpose: purpose.trim(),
+      memo: memo?.trim() || null,
+      notice: notice?.trim() || null,
+      participantEmails,
+      creatorEmail: member.email,
+    };
+
+    // 同期は非同期で実行（失敗しても予約は成功扱い）
+    const syncResult = await syncWithGoogleCalendar('create', syncData, supabase, member.id);
+    if (!syncResult.synced) {
+      console.warn('[api/reserve POST] カレンダー同期スキップ/失敗:', syncResult.error);
+    }
 
     return new Response(
       JSON.stringify({ ok: true, reservation: { id: reservation.id } }),
@@ -168,10 +198,10 @@ export const PUT: APIRoute = async ({ request, locals }) => {
       );
     }
 
-    // 既存予約を取得して権限チェック
+    // 既存予約を取得して権限チェック（event_idも取得）
     const { data: existing } = await supabase
       .from('reservations')
-      .select('created_by')
+      .select('created_by, event_id')
       .eq('id', id)
       .single();
 
@@ -235,23 +265,32 @@ export const PUT: APIRoute = async ({ request, locals }) => {
       }
     }
 
-    // Googleカレンダー同期（ダミー）
+    // Googleカレンダー同期
     const { data: facility } = await supabase
       .from('facilities')
       .select('name')
       .eq('id', facility_id)
       .single();
 
-    await syncWithGoogleCalendar('update', {
+    const participantEmails = await getParticipantEmails(supabase, participant_ids || []);
+
+    const syncData: CalendarSyncData = {
       reservationId: id,
+      eventId: existing.event_id, // 既存のGoogleカレンダーイベントID
       facilityName: facility?.name || '',
       startTime: start_time,
       endTime: end_time,
-      purpose,
-      memo,
-      notice,
-      participants: participant_ids,
-    });
+      purpose: purpose.trim(),
+      memo: memo?.trim() || null,
+      notice: notice?.trim() || null,
+      participantEmails,
+      creatorEmail: member.email,
+    };
+
+    const syncResult = await syncWithGoogleCalendar('update', syncData, supabase, existing.created_by);
+    if (!syncResult.synced) {
+      console.warn('[api/reserve PUT] カレンダー同期スキップ/失敗:', syncResult.error);
+    }
 
     return new Response(
       JSON.stringify({ ok: true }),
@@ -290,10 +329,10 @@ export const DELETE: APIRoute = async ({ request, locals }) => {
       );
     }
 
-    // 既存予約を取得して権限チェック
+    // 既存予約を取得して権限チェック（event_idも取得）
     const { data: existing } = await supabase
       .from('reservations')
-      .select('created_by, facility_id, start_time, end_time, purpose')
+      .select('created_by, facility_id, start_time, end_time, purpose, event_id')
       .eq('id', id)
       .single();
 
@@ -312,7 +351,28 @@ export const DELETE: APIRoute = async ({ request, locals }) => {
       );
     }
 
-    // 参加者を先に削除（外部キー制約）
+    // Googleカレンダーから先に削除（予約削除後はevent_idが失われるため）
+    const { data: facility } = await supabase
+      .from('facilities')
+      .select('name')
+      .eq('id', existing.facility_id)
+      .single();
+
+    const syncData: CalendarSyncData = {
+      reservationId: id,
+      eventId: existing.event_id,
+      facilityName: facility?.name || '',
+      startTime: existing.start_time,
+      endTime: existing.end_time,
+      purpose: existing.purpose,
+    };
+
+    const syncResult = await syncWithGoogleCalendar('delete', syncData, supabase, existing.created_by);
+    if (!syncResult.synced) {
+      console.warn('[api/reserve DELETE] カレンダー同期スキップ/失敗:', syncResult.error);
+    }
+
+    // 参加者を先に削除（外部キー制約対応）
     await supabase.from('reservation_participants').delete().eq('reservation_id', id);
 
     // 予約を削除
@@ -328,21 +388,6 @@ export const DELETE: APIRoute = async ({ request, locals }) => {
         { status: 500, headers: { 'Content-Type': 'application/json' } }
       );
     }
-
-    // Googleカレンダー同期（ダミー）
-    const { data: facility } = await supabase
-      .from('facilities')
-      .select('name')
-      .eq('id', existing.facility_id)
-      .single();
-
-    await syncWithGoogleCalendar('delete', {
-      reservationId: id,
-      facilityName: facility?.name || '',
-      startTime: existing.start_time,
-      endTime: existing.end_time,
-      purpose: existing.purpose,
-    });
 
     return new Response(
       JSON.stringify({ ok: true }),
