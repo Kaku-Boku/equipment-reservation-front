@@ -326,34 +326,11 @@ export async function syncWithGoogleCalendar(
 }
 
 // ===========================================
-//  トークン保存ユーティリティ（コールバックから使用）
+//  NOTE: トークンの保存処理について
 // ===========================================
-
-/**
- * OAuth認証後にGoogleのrefresh_tokenをuser_tokensテーブルに保存する
- *
- * Supabase Auth の exchangeCodeForSession 後に呼び出し、
- * provider_refresh_token を永続化する。
- */
-export async function saveProviderRefreshToken(
-  supabase: SupabaseClient,
-  memberId: string,
-  refreshToken: string
-): Promise<void> {
-  const { error } = await supabase
-    .from('user_tokens')
-    .upsert(
-      {
-        member_id: memberId,
-        refresh_token: refreshToken,
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: 'member_id' }
-    );
-
-  if (error) {
-    console.error('[GoogleCalendar] refresh_token保存エラー:', error);
-  } else {
-    console.log('[GoogleCalendar] refresh_token保存成功 (member_id:', memberId, ')');
-  }
-}
+//
+// provider_refresh_token の user_tokens テーブルへの保存は
+// src/pages/auth/callback.ts 内で直接行っている。
+//
+// 理由: refresh_token は OAuth コールバック時にのみ取得可能であり、
+//       その場で確実に永続化する必要があるため、責務をコールバックに集約した。
