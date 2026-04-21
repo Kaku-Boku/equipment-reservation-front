@@ -3,8 +3,15 @@
  *
  * 全リクエストに対して以下を実行:
  * 1. CookieからSupabaseセッションを復元
- * 2. Astro.locals にクライアント・セッション・メンバー情報を注入
- * 3. 保護ルートへの未認証アクセスを /login へリダイレクト
+ * 2. getUser() でJWTを検証し、必要に応じてトークンをリフレッシュ
+ * 3. Astro.locals にクライアント・セッション・メンバー情報を注入
+ * 4. 保護ルートへの未認証アクセスを /login へリダイレクト
+ *
+ * 【重要】
+ * getSession() はCookieからJWTを読むだけで検証しない。
+ * getUser() はSupabase Auth サーバーに問い合わせて JWT を検証し、
+ * 期限切れであれば refresh_token で新しいトークンを取得 → Cookie書き換えを行う。
+ * 永続セッションを実現するため、ミドルウェアでは必ず getUser() を使う。
  */
 import { defineMiddleware } from 'astro:middleware';
 import { createSupabaseServerClient } from './lib/supabase';
@@ -16,21 +23,30 @@ export const onRequest = defineMiddleware(async ({ locals, cookies, request, red
   // 全リクエストでSupabaseサーバークライアントを生成
   const supabase = createSupabaseServerClient(cookies, request.headers);
   locals.supabase = supabase;
-
-  // セッション取得
-  const { data: { session } } = await supabase.auth.getSession();
-  locals.session = session;
+  locals.session = null;
   locals.member = null;
 
   const url = new URL(request.url);
   const isPublicPath = PUBLIC_PATHS.some((path) => url.pathname.startsWith(path));
 
-  if (session?.user) {
-    // セッション有り: メンバー情報を取得して locals に注入
+  // ---------- JWT検証 & トークンリフレッシュ ----------
+  // getUser() は:
+  //   1. CookieからJWTを読む
+  //   2. Supabase Auth サーバーで検証
+  //   3. 期限切れなら refresh_token で更新し、setAll() で新Cookieをセット
+  // つまりこの1回の呼び出しで「永続セッション」の維持が完結する。
+  const { data: { user }, error: userError } = await supabase.auth.getUser();
+
+  if (user && !userError) {
+    // JWT有効 → セッション情報も取得して locals に注入
+    const { data: { session } } = await supabase.auth.getSession();
+    locals.session = session;
+
+    // メンバー情報を取得
     const { data: member } = await supabase
       .from('members')
       .select('id, email, name, role')
-      .eq('email', session.user.email)
+      .eq('email', user.email)
       .eq('status', 'active')
       .single();
 
@@ -41,7 +57,7 @@ export const onRequest = defineMiddleware(async ({ locals, cookies, request, red
       return redirect('/');
     }
   } else if (!isPublicPath) {
-    // セッション無し & 保護ルート → ログインへリダイレクト
+    // 未認証 & 保護ルート → ログインへリダイレクト
     return redirect('/login');
   }
 

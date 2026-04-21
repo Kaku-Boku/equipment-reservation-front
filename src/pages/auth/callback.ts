@@ -1,16 +1,18 @@
 /**
  * Google OAuth コールバックエンドポイント
  *
- * Supabaseの PKCE フローにより、このエンドポイントには Google からの
+ * Supabase の PKCE フローにより、このエンドポイントには
  * 認可コード（code）が渡される。以下の順で処理する:
  *
  * 1. code を exchangeCodeForSession() でセッションに交換
- * 2. セッション内の provider_refresh_token を user_tokens テーブルに UPSERT
- *    - refresh_token は OAuth 直後のセッションにのみ含まれ、以降は取得できない
- *    - Google OAuth は access_type: 'offline' + prompt: 'consent' の設定により
- *      毎回新しい refresh_token を発行するため、ログインのたびに上書き保存する
- *    - provider_token（アクセストークン）は有効期限が短く保存不要（都度 refresh で取得）
+ * 2. provider_refresh_token を user_tokens テーブルに UPSERT
  * 3. / にリダイレクト
+ *
+ * 【前提】
+ * クライアント側で createBrowserClient (@supabase/ssr) を使用すること。
+ * createBrowserClient は PKCE の code_verifier を Cookie に保存するため、
+ * このサーバー側で exchangeCodeForSession() が code_verifier を読み取れる。
+ * 素の createClient は localStorage に保存するため、サーバー側で読み取れず失敗する。
  */
 import type { APIRoute } from 'astro';
 import { createSupabaseServerClient } from '../../lib/supabase';
@@ -19,40 +21,54 @@ export const GET: APIRoute = async ({ request, cookies, redirect }) => {
   const requestUrl = new URL(request.url);
   const code = requestUrl.searchParams.get('code');
 
+  console.log('[auth/callback] ========== コールバック開始 ==========');
+  console.log('[auth/callback] URL:', requestUrl.pathname + requestUrl.search.substring(0, 50) + '...');
+
   if (!code) {
-    console.warn('[auth/callback] code パラメータがありません');
-    return redirect('/login');
+    console.error('[auth/callback] code パラメータがありません。URL:', requestUrl.href);
+    return redirect('/login?error=no_code');
   }
 
+  console.log('[auth/callback] code を受信。セッション交換を開始...');
   const supabase = createSupabaseServerClient(cookies, request.headers);
 
   // ── 1. 認可コード → セッション交換 ─────────────────────────────
-  //
-  // exchangeCodeForSession は:
-  //   session.provider_token         = Google のアクセストークン（短命・1時間）
-  //   session.provider_refresh_token = Google のリフレッシュトークン（永続的）
-  // を返す。ただし provider_refresh_token は初回 or prompt:'consent' 時のみ返される。
   const { data, error } = await supabase.auth.exchangeCodeForSession(code);
 
-  if (error || !data?.session) {
-    console.error('[auth/callback] コード交換エラー:', error?.message);
+  if (error) {
+    console.error('[auth/callback] ❌ exchangeCodeForSession エラー:', {
+      message: error.message,
+      status: error.status,
+      name: error.name,
+    });
     return redirect('/login?error=auth_failed');
   }
 
+  if (!data?.session) {
+    console.error('[auth/callback] ❌ セッションが返されませんでした (data.session is null)');
+    return redirect('/login?error=no_session');
+  }
+
   const { session } = data;
+  console.log('[auth/callback] ✅ セッション交換成功:', {
+    user_email: session.user?.email,
+    has_provider_token: Boolean(session.provider_token),
+    has_provider_refresh_token: Boolean(session.provider_refresh_token),
+    expires_at: session.expires_at,
+  });
 
   // ── 2. provider_refresh_token を user_tokens テーブルに保存 ─────
   //
-  // ポイント:
-  //   - provider_token（アクセストークン）は有効期限が1時間と短いため保存しない。
-  //     Google Calendar API 呼び出し時は毎回 refresh_token から再取得する。
-  //   - provider_refresh_token が null の場合は既存トークンが有効なためスキップ。
-  //     （"prompt: 'consent'" なしで再ログインした場合など）
-  if (session.provider_refresh_token) {
-    const userEmail = session.user?.email;
+  // provider_refresh_token は OAuth 直後のセッションにのみ含まれる。
+  // access_type: 'offline' + prompt: 'consent' を設定しているため
+  // 毎回返されるはずだが、Google側の判断で返されない場合もある。
+  let tokenWarning = false;
 
+  if (session.provider_refresh_token) {
+    console.log('[auth/callback] provider_refresh_token を検出。user_tokens への保存を開始...');
+
+    const userEmail = session.user?.email;
     if (userEmail) {
-      // members テーブルから member_id を取得（RLSポリシーに合わせ email で突合）
       const { data: member, error: memberError } = await supabase
         .from('members')
         .select('id')
@@ -61,11 +77,11 @@ export const GET: APIRoute = async ({ request, cookies, redirect }) => {
         .single();
 
       if (memberError || !member) {
-        // 存在しないメンバー → pre-check で弾かれるはずだが念のため
-        console.error('[auth/callback] membersテーブルにユーザーが見つかりません:', userEmail);
-        // トークン保存はスキップするがログイン自体は続行
+        console.error('[auth/callback] ❌ members テーブルにユーザーが見つかりません:', {
+          email: userEmail,
+          error: memberError?.message,
+        });
       } else {
-        // user_tokens テーブルに UPSERT（member_id が既存なら上書き）
         const { error: upsertError } = await supabase
           .from('user_tokens')
           .upsert(
@@ -78,18 +94,37 @@ export const GET: APIRoute = async ({ request, cookies, redirect }) => {
           );
 
         if (upsertError) {
-          console.error('[auth/callback] user_tokens UPSERT エラー:', upsertError.message);
-          // トークン保存失敗はカレンダー同期に影響するが、ログイン自体はブロックしない
+          console.error('[auth/callback] ❌ user_tokens UPSERT エラー:', {
+            member_id: member.id,
+            error: upsertError.message,
+            code: upsertError.code,
+          });
         } else {
-          console.log('[auth/callback] refresh_token 保存成功 (member_id:', member.id, ')');
+          console.log('[auth/callback] ✅ refresh_token 保存成功 (member_id:', member.id, ')');
         }
       }
     }
   } else {
-    // refresh_token なし = 既存セッションの再ログインなど（Google側の判断）
-    console.log('[auth/callback] provider_refresh_token なし（既存トークンを継続使用）');
+    // ── provider_refresh_token が null の場合 ──
+    // Google Calendar API との同期ができなくなるため、ユーザーに通知する。
+    tokenWarning = true;
+    console.warn('[auth/callback] ⚠️ provider_refresh_token が返されませんでした。', {
+      user_email: session.user?.email,
+      provider_token_exists: Boolean(session.provider_token),
+      message: 'Google が refresh_token を返しませんでした。' +
+        'prompt: "consent" が正しく設定されているか、' +
+        'Google Cloud Console で OAuth 同意画面の設定を確認してください。' +
+        'この状態ではGoogle Calendar連携が機能しません。',
+    });
   }
 
-  // ── 3. 認証成功 → ホームへ ───────────────────────────────────────
+  // ── 3. 認証成功 → ホームへリダイレクト ─────────────────────────
+  console.log('[auth/callback] ========== コールバック完了 ==========');
+
+  if (tokenWarning) {
+    // provider_refresh_token が無い場合はクエリパラメータで通知
+    return redirect('/?warning=token_missing');
+  }
+
   return redirect('/');
 };

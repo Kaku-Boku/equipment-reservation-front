@@ -549,10 +549,10 @@ const { data: members } = await supabase
        メインクライアントサイドスクリプト
        ============================================ -->
   <script>
-    import { createClient } from '@supabase/supabase-js';
+    import { createBrowserClient } from '@supabase/ssr';
 
     // ----- グローバル状態 -----
-    const supabase = createClient(
+    const supabase = createBrowserClient(
       (window as any).__SUPABASE_URL__,
       (window as any).__SUPABASE_ANON_KEY__
     );
@@ -586,6 +586,21 @@ const { data: members } = await supabase
       bindEvents();
       await renderCalendar();
       setupRealtime();
+
+      // コールバックからの警告通知をチェック
+      const urlParams = new URLSearchParams(window.location.search);
+      if (urlParams.get('warning') === 'token_missing') {
+        showToast(
+          'Googleカレンダー連携用のトークンを取得できませんでした。' +
+          'カレンダー同期が機能しない場合があります。' +
+          '再度ログアウト→ログインをお試しください。',
+          'error'
+        );
+        // URLからwarningパラメータを除去（リロード時に再表示しない）
+        const cleanUrl = new URL(window.location.href);
+        cleanUrl.searchParams.delete('warning');
+        window.history.replaceState({}, '', cleanUrl.pathname);
+      }
     }
 
     // ===========================================
