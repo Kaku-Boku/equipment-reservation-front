@@ -13,11 +13,6 @@ import { SUPABASE_CONFIG } from "../lib/supabase";
 import ReservationApp from "../components/ReservationApp";
 
 const { supabase, member } = Astro.locals;
-console.log('[index.astro] Page started. Member:', member?.name);
-
-if (!supabase) {
-  console.error('[index.astro] Supabase client is missing in Astro.locals!');
-}
 
 // ── 初期データの取得範囲を算出 ──
 const today = new Date();
@@ -52,22 +47,14 @@ const { data: facilities } = await supabase
   .order("name");
 
 // メンバー一覧（参加者選択用）
-const { data: members, error: membersError } = await supabase
+const { data: members } = await supabase
   .from("members")
   .select("id, name, email")
   .eq("status", "active")
   .order("name");
-
-console.log('[index.astro] Data fetch complete:', {
-  reservationsCount: initialReservations?.length || 0,
-  facilitiesCount: facilities?.length || 0,
-  membersCount: members?.length || 0,
-  hasErrors: Boolean(membersError)
-});
 ---
 
 <Layout title="設備予約">
-  <div style="display:none">SSR Rendering Check: OK</div>
   <ReservationApp
     client:load
     initialReservations={initialReservations || []}

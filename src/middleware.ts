@@ -22,15 +22,12 @@ import { env } from 'cloudflare:workers';
 const PUBLIC_PATHS = ['/login', '/auth/callback', '/api/pre-check'];
 
 export const onRequest = defineMiddleware(async ({ locals, cookies, request, redirect }, next) => {
-  console.log('[middleware] Request started:', request.url);
-  
   // Cloudflare Pages のランタイム環境変数を取得
   let runtimeEnv = {};
   try {
     runtimeEnv = env || {};
-    console.log('[middleware] runtimeEnv keys:', Object.keys(runtimeEnv));
   } catch (e) {
-    console.error('[middleware] Failed to access env:', e);
+    // runtimeEnv access failed
   }
 
   // 全リクエストで Supabase サーバークライアントを生成
@@ -41,15 +38,12 @@ export const onRequest = defineMiddleware(async ({ locals, cookies, request, red
 
   const url = new URL(request.url);
   const isPublicPath = PUBLIC_PATHS.some((path) => url.pathname.startsWith(path));
-  console.log('[middleware] Path:', url.pathname, 'isPublic:', isPublicPath);
 
   // ── JWT 検証 & トークンリフレッシュ ──
   try {
-    console.log('[middleware] Verifying JWT...');
     const { data: { user }, error: userError } = await supabase.auth.getUser();
 
     if (user && !userError) {
-      console.log('[middleware] User found:', user.email);
       // JWT 有効 → セッション情報を locals に注入
       const { data: { session } } = await supabase.auth.getSession();
       locals.session = session;
@@ -63,25 +57,20 @@ export const onRequest = defineMiddleware(async ({ locals, cookies, request, red
         .single();
 
       locals.member = member;
-      console.log('[middleware] Member loaded:', member?.name);
 
       // ログイン済みで /login にアクセスした場合は / にリダイレクト
       if (url.pathname === '/login') {
-        console.log('[middleware] Logged in user on /login, redirecting to /');
         return redirect('/');
       }
     } else {
-      console.log('[middleware] No user or error:', userError?.message);
       if (!isPublicPath) {
         // 未認証 & 保護ルート → ログインページへリダイレクト
-        console.log('[middleware] Protected path, redirecting to /login');
         return redirect('/login');
       }
     }
   } catch (err) {
-    console.error('[middleware] Unexpected error:', err);
+    // ignore error
   }
 
-  console.log('[middleware] Proceeding to next...');
   return next();
 });
