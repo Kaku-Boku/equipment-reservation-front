@@ -14,8 +14,6 @@
 import type { APIRoute } from 'astro';
 import { syncWithGoogleCalendar } from '../../lib/google-calendar';
 import type { CalendarSyncData } from '../../lib/google-calendar';
-// @ts-ignore
-import { env } from 'cloudflare:workers';
 
 /** JSON レスポンスの共通ヘッダー */
 const JSON_HEADERS = { 'Content-Type': 'application/json' } as const;
@@ -161,7 +159,8 @@ export const POST: APIRoute = async ({ request, locals }) => {
       creatorEmail: member.email,
     };
 
-    const runtimeEnv = env || {};
+    // @ts-ignore (型定義がない場合の暫定対応)
+    const runtimeEnv = locals.runtime?.env || {};
     const syncResult = await syncWithGoogleCalendar('create', syncData, supabase, member.id, runtimeEnv);
     if (!syncResult.synced) {
       console.warn('[api/reserve POST] カレンダー同期スキップ/失敗:', syncResult.error);
@@ -316,7 +315,8 @@ export const PUT: APIRoute = async ({ request, locals }) => {
       creatorEmail: member.email,
     };
 
-    const runtimeEnv = env || {};
+    // @ts-ignore (型定義がない場合の暫定対応)
+    const runtimeEnv = locals.runtime?.env || {};
     const syncResult = await syncWithGoogleCalendar('update', syncData, supabase, existing.created_by, runtimeEnv);
     if (!syncResult.synced) {
       console.warn('[api/reserve PUT] カレンダー同期スキップ/失敗:', syncResult.error);
@@ -399,7 +399,8 @@ export const DELETE: APIRoute = async ({ request, locals }) => {
       purpose: existing.purpose,
     };
 
-    const runtimeEnv = env || {};
+    // @ts-ignore (型定義がない場合の暫定対応)
+    const runtimeEnv = locals.runtime?.env || {};
     const syncResult = await syncWithGoogleCalendar('delete', syncData, supabase, existing.created_by, runtimeEnv);
     if (!syncResult.synced) {
       console.warn('[api/reserve DELETE] カレンダー同期スキップ/失敗:', syncResult.error);
