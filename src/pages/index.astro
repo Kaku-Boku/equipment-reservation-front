@@ -67,6 +67,7 @@ console.log('[index.astro] Data fetch complete:', {
 ---
 
 <Layout title="設備予約">
+  <div style="display:none">SSR Rendering Check: OK</div>
   <ReservationApp
     client:load
     initialReservations={initialReservations || []}
