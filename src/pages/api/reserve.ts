@@ -159,7 +159,8 @@ export const POST: APIRoute = async ({ request, locals }) => {
       creatorEmail: member.email,
     };
 
-    const syncResult = await syncWithGoogleCalendar('create', syncData, supabase, member.id);
+    const runtimeEnv = (locals as any).runtime?.env || {};
+    const syncResult = await syncWithGoogleCalendar('create', syncData, supabase, member.id, runtimeEnv);
     if (!syncResult.synced) {
       console.warn('[api/reserve POST] カレンダー同期スキップ/失敗:', syncResult.error);
     }
@@ -313,7 +314,8 @@ export const PUT: APIRoute = async ({ request, locals }) => {
       creatorEmail: member.email,
     };
 
-    const syncResult = await syncWithGoogleCalendar('update', syncData, supabase, existing.created_by);
+    const runtimeEnv = (locals as any).runtime?.env || {};
+    const syncResult = await syncWithGoogleCalendar('update', syncData, supabase, existing.created_by, runtimeEnv);
     if (!syncResult.synced) {
       console.warn('[api/reserve PUT] カレンダー同期スキップ/失敗:', syncResult.error);
     }
@@ -395,7 +397,8 @@ export const DELETE: APIRoute = async ({ request, locals }) => {
       purpose: existing.purpose,
     };
 
-    const syncResult = await syncWithGoogleCalendar('delete', syncData, supabase, existing.created_by);
+    const runtimeEnv = (locals as any).runtime?.env || {};
+    const syncResult = await syncWithGoogleCalendar('delete', syncData, supabase, existing.created_by, runtimeEnv);
     if (!syncResult.synced) {
       console.warn('[api/reserve DELETE] カレンダー同期スキップ/失敗:', syncResult.error);
     }

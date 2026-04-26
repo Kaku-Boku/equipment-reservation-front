@@ -29,5 +29,13 @@ declare namespace App {
       name: string;
       role: 'admin' | 'user';
     } | null;
+    /** Cloudflare Pages の実行環境 (Bindings) */
+    runtime?: {
+      env: {
+        GOOGLE_CLIENT_ID?: string;
+        GOOGLE_CLIENT_SECRET?: string;
+        [key: string]: any;
+      };
+    };
   }
 }

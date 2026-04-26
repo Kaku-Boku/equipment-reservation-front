@@ -16,6 +16,12 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 const CALENDAR_API_BASE = 'https://www.googleapis.com/calendar/v3';
 const TOKEN_ENDPOINT = 'https://oauth2.googleapis.com/token';
 
+/** 環境変数を受け取るための型 */
+export interface CalendarEnv {
+  GOOGLE_CLIENT_ID?: string;
+  GOOGLE_CLIENT_SECRET?: string;
+}
+
 /** カレンダー同期に必要なデータ */
 export interface CalendarSyncData {
   reservationId: string;
@@ -47,23 +53,26 @@ export interface CalendarSyncResult {
 /**
  * Google OAuth2 のクライアント認証情報が設定されているか確認
  */
-function isGoogleCalendarConfigured(): boolean {
-  const clientId = import.meta.env.GOOGLE_CLIENT_ID;
-  const clientSecret = import.meta.env.GOOGLE_CLIENT_SECRET;
+function isGoogleCalendarConfigured(env: CalendarEnv): boolean {
+  const clientId = env.GOOGLE_CLIENT_ID || import.meta.env.GOOGLE_CLIENT_ID;
+  const clientSecret = env.GOOGLE_CLIENT_SECRET || import.meta.env.GOOGLE_CLIENT_SECRET;
   return Boolean(clientId && clientSecret);
 }
 
 /**
  * refresh_token から access_token を取得
  */
-async function getAccessToken(refreshToken: string): Promise<string | null> {
+async function getAccessToken(refreshToken: string, env: CalendarEnv): Promise<string | null> {
+  const clientId = env.GOOGLE_CLIENT_ID || import.meta.env.GOOGLE_CLIENT_ID;
+  const clientSecret = env.GOOGLE_CLIENT_SECRET || import.meta.env.GOOGLE_CLIENT_SECRET;
+
   try {
     const response = await fetch(TOKEN_ENDPOINT, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({
-        client_id: import.meta.env.GOOGLE_CLIENT_ID,
-        client_secret: import.meta.env.GOOGLE_CLIENT_SECRET,
+        client_id: clientId,
+        client_secret: clientSecret,
         refresh_token: refreshToken,
         grant_type: 'refresh_token',
       }),
@@ -247,10 +256,11 @@ export async function syncWithGoogleCalendar(
   action: 'create' | 'update' | 'delete',
   data: CalendarSyncData,
   supabase: SupabaseClient,
-  memberId: string
+  memberId: string,
+  env: CalendarEnv = {}
 ): Promise<CalendarSyncResult> {
   // Google Calendar 未設定の場合はスキップ
-  if (!isGoogleCalendarConfigured()) {
+  if (!isGoogleCalendarConfigured(env)) {
     console.log('[GoogleCalendar] 環境変数未設定のためスキップ (action:', action, ')');
     return { eventId: data.eventId || null, synced: false };
   }
@@ -263,7 +273,7 @@ export async function syncWithGoogleCalendar(
     }
 
     // 2. access_token を取得
-    const accessToken = await getAccessToken(refreshToken);
+    const accessToken = await getAccessToken(refreshToken, env);
     if (!accessToken) {
       return { eventId: data.eventId || null, synced: false, error: 'access_token取得失敗' };
     }
