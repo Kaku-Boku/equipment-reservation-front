@@ -2,12 +2,15 @@
 /**
  * 共通レイアウトコンポーネント
  *
- * - HTMLシェル（head, meta, SEO）
- * - Google Fonts (Inter, Noto Sans JP) の読み込み
- * - グローバルCSS (Tailwind v4) の読み込み
- * - ヘッダーコンポーネントの組み込み
+ * - HTML シェル（head / meta / SEO）
+ * - Google Fonts（Inter, Noto Sans JP）の読み込み
+ * - グローバルCSS（Tailwind v4）の読み込み
+ * - テーマ初期化（FOUC 防止のインラインスクリプト）
+ * - Supabase 設定のクライアント公開
+ * - ヘッダーの組み込み
  */
 import Header from '../components/Header.astro';
+import { SUPABASE_CONFIG } from '../lib/supabase';
 import '../styles/global.css';
 
 interface Props {
@@ -40,8 +43,35 @@ const member = Astro.locals.member;
       rel="stylesheet"
     />
     <title>{title}</title>
+
+    <!--
+      テーマ初期化スクリプト（FOUC防止）
+      - localStorage の値を即時に <html> へ反映して、白→黒のチラつきを防ぐ
+      - 初回アクセス時はデフォルト "light" を適用
+    -->
+    <script is:inline>
+      (function () {
+        var t = localStorage.getItem('theme') || 'light';
+        document.documentElement.setAttribute('data-theme', t);
+      })();
+    </script>
   </head>
-  <body class="min-h-dvh bg-surface-950 text-surface-100">
+
+  <body class="min-h-dvh">
+    <!--
+      Supabase 設定をグローバル変数として公開
+      - Header のログアウトボタンや、Preactコンポーネント内で使用
+    -->
+    <script
+      define:vars={{
+        supabaseUrl: SUPABASE_CONFIG.url,
+        supabaseKey: SUPABASE_CONFIG.anonKey,
+      }}
+    >
+      window.__SUPABASE_URL__ = supabaseUrl;
+      window.__SUPABASE_ANON_KEY__ = supabaseKey;
+    </script>
+
     {showHeader && member && <Header memberName={member.name} />}
     <main>
       <slot />

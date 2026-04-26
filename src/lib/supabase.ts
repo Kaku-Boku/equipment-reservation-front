@@ -1,15 +1,23 @@
 /**
  * Supabase クライアントユーティリティ
  *
- * - createSupabaseServerClient: SSR用（AstroのCookies APIと連携してセッション管理）
- * - BROWSER_SUPABASE_CONFIG: クライアントサイドでcreateClient()に渡す設定
+ * SSR 用とクライアントサイド用の 2 つのエクスポートを提供:
+ *
+ * - createSupabaseServerClient: Astro SSR ミドルウェア / API ルートで使用。
+ *   Astro の Cookies API と連携してセッション Cookie の読み書きを行う。
+ *
+ * - SUPABASE_CONFIG: ブラウザ側で createClient() に渡す設定値。
+ *   HTML にインライン出力して Preact コンポーネントから参照する。
  */
-import { createServerClient, parseCookieHeader, serializeCookieHeader } from '@supabase/ssr';
+import { createServerClient, parseCookieHeader } from '@supabase/ssr';
 import type { AstroCookies } from 'astro';
 
 /**
- * SSR用Supabaseクライアントを生成
- * AstroのCookies APIを使ってセッションCookieの読み書きを行う
+ * SSR 用 Supabase クライアントを生成する
+ *
+ * @param cookies - Astro の Cookies API インスタンス
+ * @param headers - リクエストヘッダー（Cookie 文字列の取得に使用）
+ * @returns 認証セッション付きの Supabase クライアント
  */
 export function createSupabaseServerClient(cookies: AstroCookies, headers: Headers) {
   return createServerClient(
@@ -18,12 +26,11 @@ export function createSupabaseServerClient(cookies: AstroCookies, headers: Heade
     {
       cookies: {
         getAll() {
-          // Astro の cookies.get() ではなく、リクエストヘッダーの Cookie 文字列をパースして
-          // @supabase/ssr が期待する { name, value }[] 形式に変換する
+          // リクエストヘッダーの Cookie 文字列を { name, value }[] にパース
           return parseCookieHeader(headers.get('Cookie') ?? '');
         },
         setAll(cookiesToSet) {
-          // セッション更新時に呼ばれる: 各Cookieを Astro の cookies.set() でレスポンスに付与
+          // セッション更新時: 各 Cookie を Astro の cookies.set() でレスポンスに付与
           cookiesToSet.forEach(({ name, value, options }) => {
             cookies.set(name, value, {
               path: '/',
@@ -37,8 +44,10 @@ export function createSupabaseServerClient(cookies: AstroCookies, headers: Heade
 }
 
 /**
- * クライアントサイド用のSupabase設定値
- * ブラウザ側では import.meta.env が使えないため、HTMLにインライン出力するための定数
+ * クライアントサイド用の Supabase 接続設定
+ *
+ * ブラウザでは import.meta.env が使えないため、
+ * Layout.astro で `<script define:vars>` を通じてグローバルに公開する。
  */
 export const SUPABASE_CONFIG = {
   url: import.meta.env.PUBLIC_SUPABASE_URL,

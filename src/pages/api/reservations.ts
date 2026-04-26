@@ -1,13 +1,17 @@
 /**
- * 予約データ取得API
+ * 予約データ取得 API
  *
  * クエリパラメータ:
- * - date: YYYY-MM-DD (指定日の予約)
- * - month: YYYY-MM (月単位: カレンダー表示用の件数集計)
+ * - date:  YYYY-MM-DD（指定日の予約を詳細取得 → タイムライン表示用）
+ * - month: YYYY-MM（月単位で予約件数を集計 → カレンダー表示用）
  *
- * Supabase の関連テーブルJOINを使って一撃でネストされたデータを取得する。
+ * Supabase の関連テーブル JOIN を活用して
+ * ネストされたデータを一度のクエリで取得する。
  */
 import type { APIRoute } from 'astro';
+
+/** JSON レスポンスの共通ヘッダー */
+const JSON_HEADERS = { 'Content-Type': 'application/json' } as const;
 
 export const GET: APIRoute = async ({ request, locals }) => {
   const { session, supabase } = locals;
@@ -15,17 +19,17 @@ export const GET: APIRoute = async ({ request, locals }) => {
   if (!session) {
     return new Response(
       JSON.stringify({ error: '認証が必要です。' }),
-      { status: 401, headers: { 'Content-Type': 'application/json' } }
+      { status: 401, headers: JSON_HEADERS }
     );
   }
 
   const url = new URL(request.url);
-  const date = url.searchParams.get('date');     // YYYY-MM-DD
-  const month = url.searchParams.get('month');   // YYYY-MM
+  const date = url.searchParams.get('date');
+  const month = url.searchParams.get('month');
 
   try {
     if (date) {
-      // 指定日の予約を詳細取得（タイムライン表示用）
+      // ── 指定日の予約を詳細取得（タイムライン表示用） ──
       const dayStart = `${date}T00:00:00`;
       const dayEnd = `${date}T23:59:59`;
 
@@ -51,19 +55,19 @@ export const GET: APIRoute = async ({ request, locals }) => {
         console.error('[api/reservations] 日次取得エラー:', error);
         return new Response(
           JSON.stringify({ error: '予約データの取得に失敗しました。' }),
-          { status: 500, headers: { 'Content-Type': 'application/json' } }
+          { status: 500, headers: JSON_HEADERS }
         );
       }
 
       return new Response(
         JSON.stringify({ reservations }),
-        { status: 200, headers: { 'Content-Type': 'application/json' } }
+        { status: 200, headers: JSON_HEADERS }
       );
+
     } else if (month) {
-      // 月単位: 各日の予約件数を取得（カレンダー表示用）
+      // ── 月単位: 各日の予約件数を集計（カレンダー表示用） ──
       const [year, mon] = month.split('-').map(Number);
       const monthStart = `${month}-01T00:00:00`;
-      // 月末日を計算
       const lastDay = new Date(year, mon, 0).getDate();
       const monthEnd = `${month}-${String(lastDay).padStart(2, '0')}T23:59:59`;
 
@@ -78,7 +82,7 @@ export const GET: APIRoute = async ({ request, locals }) => {
         console.error('[api/reservations] 月次取得エラー:', error);
         return new Response(
           JSON.stringify({ error: '予約データの取得に失敗しました。' }),
-          { status: 500, headers: { 'Content-Type': 'application/json' } }
+          { status: 500, headers: JSON_HEADERS }
         );
       }
 
@@ -91,19 +95,20 @@ export const GET: APIRoute = async ({ request, locals }) => {
 
       return new Response(
         JSON.stringify({ countByDate, reservations }),
-        { status: 200, headers: { 'Content-Type': 'application/json' } }
+        { status: 200, headers: JSON_HEADERS }
       );
+
     } else {
       return new Response(
         JSON.stringify({ error: 'date または month パラメータを指定してください。' }),
-        { status: 400, headers: { 'Content-Type': 'application/json' } }
+        { status: 400, headers: JSON_HEADERS }
       );
     }
   } catch (err) {
     console.error('[api/reservations] 予期せぬエラー:', err);
     return new Response(
       JSON.stringify({ error: 'サーバーエラーが発生しました。' }),
-      { status: 500, headers: { 'Content-Type': 'application/json' } }
+      { status: 500, headers: JSON_HEADERS }
     );
   }
 };

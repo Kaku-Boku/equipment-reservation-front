@@ -2,16 +2,16 @@
 /**
  * ログインページ
  *
- * Pre-Checkフロー:
- * 1. メアド入力 → 「次へ」ボタン
+ * Pre-Check フロー:
+ * 1. メアド入力 →「次へ」ボタン
  * 2. /api/pre-check で members テーブルの存在チェック
  * 3. 存在する場合のみ supabase.auth.signInWithOAuth() を発火
- * 4. 存在しなければエラー表示
+ * 4. 存在しなければエラー表示（Google OAuthの枠消費を防止）
  */
 import Layout from "../layouts/Layout.astro";
 import { SUPABASE_CONFIG } from "../lib/supabase";
 
-// すでにログイン済みなら / にリダイレクト（ミドルウェアでも行うが安全策）
+// ログイン済みなら / にリダイレクト（ミドルウェアでも行うが安全策）
 if (Astro.locals.session) {
   return Astro.redirect("/");
 }
@@ -22,13 +22,15 @@ const authError = Astro.url.searchParams.get("error");
 <Layout title="ログイン | 設備予約" showHeader={false}>
   <div class="flex min-h-dvh items-center justify-center px-4">
     <div class="w-full max-w-md animate-fade-in">
+
       <!-- ロゴ & タイトル -->
       <div class="mb-8 text-center">
         <div
-          class="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-primary-500/15"
+          class="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl"
+          style="background: oklch(0.55 0.21 250 / 0.1);"
         >
           <svg
-            class="h-8 w-8 text-primary-400"
+            class="h-8 w-8 text-primary-500"
             viewBox="0 0 24 24"
             fill="none"
             stroke="currentColor"
@@ -42,24 +44,22 @@ const authError = Astro.url.searchParams.get("error");
             <line x1="3" y1="10" x2="21" y2="10"></line>
           </svg>
         </div>
-        <h1 class="text-2xl font-bold tracking-tight text-surface-50">
+        <h1 class="text-2xl font-bold tracking-tight" style="color: var(--theme-text);">
           設備予約
         </h1>
-        <p class="mt-2 text-sm text-surface-400">
+        <p class="mt-2 text-sm" style="color: var(--theme-text-secondary);">
           社内メールアドレスを入力してログイン
         </p>
       </div>
 
       <!-- ログインフォーム -->
-      <div
-        class="rounded-2xl border border-surface-800/60 bg-surface-900/50 p-6 shadow-xl backdrop-blur"
-      >
+      <div class="card p-6">
         <form id="login-form" autocomplete="on">
           <div class="space-y-4">
             <div>
               <label
                 for="email-input"
-                class="mb-1.5 block text-sm font-medium text-surface-300"
+                class="form-label"
               >
                 メールアドレス
               </label>
@@ -70,7 +70,7 @@ const authError = Astro.url.searchParams.get("error");
                 required
                 autocomplete="email"
                 placeholder="your-name@company.com"
-                class="w-full rounded-xl border border-surface-700 bg-surface-800/50 px-4 py-3 text-sm text-surface-100 placeholder-surface-500 transition-all focus:border-primary-400 focus:outline-none focus:ring-2 focus:ring-primary-400/30"
+                class="form-input"
               />
             </div>
           </div>
@@ -78,13 +78,17 @@ const authError = Astro.url.searchParams.get("error");
           <!-- エラー表示 -->
           <div
             id="error-message"
-            class="mt-3 hidden rounded-lg bg-danger-500/10 p-3 text-sm text-danger-400"
+            class="mt-3 hidden rounded-lg px-4 py-3 text-sm font-medium"
+            style="background: oklch(0.62 0.22 25 / 0.08); color: var(--color-danger-500); border: 1px solid oklch(0.62 0.22 25 / 0.2);"
           >
           </div>
 
           {
             authError && (
-              <div class="mt-3 rounded-lg bg-danger-500/10 p-3 text-sm text-danger-400">
+              <div
+                class="mt-3 rounded-lg px-4 py-3 text-sm font-medium"
+                style="background: oklch(0.62 0.22 25 / 0.08); color: var(--color-danger-500); border: 1px solid oklch(0.62 0.22 25 / 0.2);"
+              >
                 認証に失敗しました。もう一度お試しください。
               </div>
             )
@@ -94,7 +98,8 @@ const authError = Astro.url.searchParams.get("error");
           <button
             id="submit-btn"
             type="submit"
-            class="mt-6 w-full rounded-xl bg-primary-500 px-4 py-3 text-sm font-semibold text-white shadow-lg shadow-primary-500/25 transition-all hover:bg-primary-400 hover:shadow-primary-400/30 focus:outline-none focus:ring-2 focus:ring-primary-400/50 disabled:cursor-not-allowed disabled:opacity-50"
+            class="mt-6 w-full rounded-xl px-4 py-3 text-sm font-semibold text-white shadow-lg transition-all hover:shadow-xl focus:outline-none focus:ring-2 focus:ring-primary-400/50 disabled:cursor-not-allowed disabled:opacity-50"
+            style="background: linear-gradient(135deg, oklch(0.55 0.21 250), oklch(0.50 0.19 260)); box-shadow: 0 4px 14px oklch(0.55 0.21 250 / 0.3);"
           >
             <span id="btn-text">次へ</span>
             <span id="btn-loading" class="hidden">
@@ -122,13 +127,13 @@ const authError = Astro.url.searchParams.get("error");
         </form>
       </div>
 
-      <p class="mt-6 text-center text-xs text-surface-500">
+      <p class="mt-6 text-center text-xs" style="color: var(--theme-text-secondary);">
         ※ 社内メンバーのみログイン可能です
       </p>
     </div>
   </div>
 
-  <!-- Supabase 設定をクライアントに渡す -->
+  <!-- Supabase 設定のクライアント公開 -->
   <script
     define:vars={{
       supabaseUrl: SUPABASE_CONFIG.url,
@@ -143,27 +148,24 @@ const authError = Astro.url.searchParams.get("error");
     import { createBrowserClient } from "@supabase/ssr";
 
     const form = document.getElementById("login-form") as HTMLFormElement;
-    const emailInput = document.getElementById(
-      "email-input",
-    ) as HTMLInputElement;
+    const emailInput = document.getElementById("email-input") as HTMLInputElement;
     const errorDiv = document.getElementById("error-message") as HTMLDivElement;
-    const submitBtn = document.getElementById(
-      "submit-btn",
-    ) as HTMLButtonElement;
+    const submitBtn = document.getElementById("submit-btn") as HTMLButtonElement;
     const btnText = document.getElementById("btn-text") as HTMLSpanElement;
-    const btnLoading = document.getElementById(
-      "btn-loading",
-    ) as HTMLSpanElement;
+    const btnLoading = document.getElementById("btn-loading") as HTMLSpanElement;
 
+    /** エラーメッセージを表示 */
     function showError(message: string) {
       errorDiv.textContent = message;
       errorDiv.classList.remove("hidden");
     }
 
+    /** エラーメッセージを非表示 */
     function hideError() {
       errorDiv.classList.add("hidden");
     }
 
+    /** ローディング状態の切替 */
     function setLoading(loading: boolean) {
       submitBtn.disabled = loading;
       btnText.classList.toggle("hidden", loading);
@@ -183,7 +185,7 @@ const authError = Astro.url.searchParams.get("error");
       setLoading(true);
 
       try {
-        // Step 1: Pre-check - メアドの存在確認
+        // Step 1: メアドの存在確認（Pre-Check）
         const res = await fetch("/api/pre-check", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -197,12 +199,10 @@ const authError = Astro.url.searchParams.get("error");
           return;
         }
 
-        // Step 2: Pre-check OK → Google OAuth 発火
+        // Step 2: Pre-Check OK → Google OAuth 発火
         // 【重要】createBrowserClient を使用すること。
-        // createBrowserClient は PKCE の code_verifier を Cookie に保存するため、
+        // PKCE の code_verifier を Cookie に保存するため、
         // サーバーサイドの /auth/callback でも読み取り可能。
-        // 素の createClient は localStorage に保存するため、サーバー側で読み取れず
-        // exchangeCodeForSession() が失敗する。
         const supabase = createBrowserClient(
           (window as any).__SUPABASE_URL__,
           (window as any).__SUPABASE_ANON_KEY__,
@@ -217,7 +217,6 @@ const authError = Astro.url.searchParams.get("error");
               access_type: "offline",
               login_hint: email,
             },
-            // scopes: 'https://www.googleapis.com/auth/calendar.events',
             scopes:
               "openid email profile https://www.googleapis.com/auth/calendar.events",
           },

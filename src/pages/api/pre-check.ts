@@ -1,11 +1,21 @@
 /**
- * メールアドレス事前チェックAPI
+ * メールアドレス事前チェック API
  *
- * Google OAuthの未検証アプリ100名制限枠を無駄消費しないため、
- * OAuth発火前にメアドが members テーブルに存在するかチェックする。
+ * Google OAuth の未検証アプリ 100 名制限枠を無駄消費しないため、
+ * OAuth 発火前にメアドが members テーブルに存在するかチェックする。
+ *
+ * レスポンス:
+ * - ok: true  → 登録済み。クライアント側で OAuth を発火して良い
+ * - ok: false → 未登録。エラーメッセージを表示する
  */
 import type { APIRoute } from 'astro';
 import { createSupabaseServerClient } from '../../lib/supabase';
+
+/** JSON レスポンスの共通ヘッダー */
+const JSON_HEADERS = { 'Content-Type': 'application/json' } as const;
+
+/** メールアドレスの基本バリデーション正規表現 */
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export const POST: APIRoute = async ({ request, cookies }) => {
   try {
@@ -15,16 +25,14 @@ export const POST: APIRoute = async ({ request, cookies }) => {
     if (!email) {
       return new Response(
         JSON.stringify({ ok: false, message: 'メールアドレスを入力してください。' }),
-        { status: 400, headers: { 'Content-Type': 'application/json' } }
+        { status: 400, headers: JSON_HEADERS }
       );
     }
 
-    // メールアドレスの基本バリデーション
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(email)) {
+    if (!EMAIL_REGEX.test(email)) {
       return new Response(
         JSON.stringify({ ok: false, message: '有効なメールアドレスを入力してください。' }),
-        { status: 400, headers: { 'Content-Type': 'application/json' } }
+        { status: 400, headers: JSON_HEADERS }
       );
     }
 
@@ -44,19 +52,19 @@ export const POST: APIRoute = async ({ request, cookies }) => {
           ok: false,
           message: 'このメールアドレスは登録されていません。管理者にお問い合わせください。',
         }),
-        { status: 200, headers: { 'Content-Type': 'application/json' } }
+        { status: 200, headers: JSON_HEADERS }
       );
     }
 
     return new Response(
       JSON.stringify({ ok: true, member: { name: member.name } }),
-      { status: 200, headers: { 'Content-Type': 'application/json' } }
+      { status: 200, headers: JSON_HEADERS }
     );
   } catch (err) {
     console.error('[api/pre-check] エラー:', err);
     return new Response(
       JSON.stringify({ ok: false, message: 'サーバーエラーが発生しました。' }),
-      { status: 500, headers: { 'Content-Type': 'application/json' } }
+      { status: 500, headers: JSON_HEADERS }
     );
   }
 };
