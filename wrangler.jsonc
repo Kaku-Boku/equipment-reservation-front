@@ -1,0 +1,9 @@
+{
+	"compatibility_date": "2024-04-03",
+	"name": "equipment-reservation",
+	"main": "@astrojs/cloudflare/entrypoints/server",
+	"assets": {
+		"directory": "./dist",
+		"binding": "ASSETS"
+	}
+}
