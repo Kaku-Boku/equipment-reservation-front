@@ -16,6 +16,8 @@
  */
 import type { APIRoute } from 'astro';
 import { createSupabaseServerClient } from '../../lib/supabase';
+// @ts-ignore
+import { env } from 'cloudflare:workers';
 
 export const GET: APIRoute = async ({ request, cookies, redirect, locals }) => {
   const requestUrl = new URL(request.url);
@@ -28,7 +30,7 @@ export const GET: APIRoute = async ({ request, cookies, redirect, locals }) => {
     return redirect('/login?error=no_code');
   }
 
-  const runtimeEnv = (locals as any).runtime?.env || {};
+  const runtimeEnv = env || {};
   const supabase = createSupabaseServerClient(cookies, request.headers, runtimeEnv);
 
   // ── 1. 認可コード → セッション交換 ──

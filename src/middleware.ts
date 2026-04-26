@@ -15,13 +15,15 @@
  */
 import { defineMiddleware } from 'astro:middleware';
 import { createSupabaseServerClient } from './lib/supabase';
+// @ts-ignore
+import { env } from 'cloudflare:workers';
 
 /** 認証不要なパスのプレフィックス一覧 */
 const PUBLIC_PATHS = ['/login', '/auth/callback', '/api/pre-check'];
 
 export const onRequest = defineMiddleware(async ({ locals, cookies, request, redirect }, next) => {
   // Cloudflare Pages のランタイム環境変数を取得
-  const runtimeEnv = (locals as any).runtime?.env || {};
+  const runtimeEnv = env || {};
 
   // 全リクエストで Supabase サーバークライアントを生成
   const supabase = createSupabaseServerClient(cookies, request.headers, runtimeEnv);
