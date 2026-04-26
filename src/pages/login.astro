@@ -12,7 +12,9 @@ import Layout from "../layouts/Layout.astro";
 import { SUPABASE_CONFIG } from "../lib/supabase";
 
 // ログイン済みなら / にリダイレクト（ミドルウェアでも行うが安全策）
+console.log('[login.astro] Page started. Session:', Astro.locals.session ? 'exists' : 'none');
 if (Astro.locals.session) {
+  console.log('[login.astro] Redirecting to /');
   return Astro.redirect("/");
 }
 

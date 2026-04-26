@@ -28,6 +28,12 @@ export function createSupabaseServerClient(
   const supabaseUrl = runtimeEnv?.PUBLIC_SUPABASE_URL || import.meta.env.PUBLIC_SUPABASE_URL;
   const supabaseKey = runtimeEnv?.PUBLIC_SUPABASE_PUBLISHABLE_KEY || import.meta.env.PUBLIC_SUPABASE_PUBLISHABLE_KEY;
 
+  console.log('[supabase.ts] Creating server client:', {
+    hasUrl: Boolean(supabaseUrl),
+    hasKey: Boolean(supabaseKey),
+    urlSource: runtimeEnv?.PUBLIC_SUPABASE_URL ? 'runtimeEnv' : 'import.meta.env'
+  });
+
   return createServerClient(
     supabaseUrl,
     supabaseKey,

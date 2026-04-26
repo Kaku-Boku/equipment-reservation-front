@@ -22,8 +22,16 @@ import { env } from 'cloudflare:workers';
 const PUBLIC_PATHS = ['/login', '/auth/callback', '/api/pre-check'];
 
 export const onRequest = defineMiddleware(async ({ locals, cookies, request, redirect }, next) => {
+  console.log('[middleware] Request started:', request.url);
+  
   // Cloudflare Pages のランタイム環境変数を取得
-  const runtimeEnv = env || {};
+  let runtimeEnv = {};
+  try {
+    runtimeEnv = env || {};
+    console.log('[middleware] runtimeEnv keys:', Object.keys(runtimeEnv));
+  } catch (e) {
+    console.error('[middleware] Failed to access env:', e);
+  }
 
   // 全リクエストで Supabase サーバークライアントを生成
   const supabase = createSupabaseServerClient(cookies, request.headers, runtimeEnv);
@@ -33,33 +41,47 @@ export const onRequest = defineMiddleware(async ({ locals, cookies, request, red
 
   const url = new URL(request.url);
   const isPublicPath = PUBLIC_PATHS.some((path) => url.pathname.startsWith(path));
+  console.log('[middleware] Path:', url.pathname, 'isPublic:', isPublicPath);
 
   // ── JWT 検証 & トークンリフレッシュ ──
-  const { data: { user }, error: userError } = await supabase.auth.getUser();
+  try {
+    console.log('[middleware] Verifying JWT...');
+    const { data: { user }, error: userError } = await supabase.auth.getUser();
 
-  if (user && !userError) {
-    // JWT 有効 → セッション情報を locals に注入
-    const { data: { session } } = await supabase.auth.getSession();
-    locals.session = session;
+    if (user && !userError) {
+      console.log('[middleware] User found:', user.email);
+      // JWT 有効 → セッション情報を locals に注入
+      const { data: { session } } = await supabase.auth.getSession();
+      locals.session = session;
 
-    // members テーブルからユーザー情報を取得
-    const { data: member } = await supabase
-      .from('members')
-      .select('id, email, name, role')
-      .eq('email', user.email)
-      .eq('status', 'active')
-      .single();
+      // members テーブルからユーザー情報を取得
+      const { data: member } = await supabase
+        .from('members')
+        .select('id, email, name, role')
+        .eq('email', user.email)
+        .eq('status', 'active')
+        .single();
 
-    locals.member = member;
+      locals.member = member;
+      console.log('[middleware] Member loaded:', member?.name);
 
-    // ログイン済みで /login にアクセスした場合は / にリダイレクト
-    if (url.pathname === '/login') {
-      return redirect('/');
+      // ログイン済みで /login にアクセスした場合は / にリダイレクト
+      if (url.pathname === '/login') {
+        console.log('[middleware] Logged in user on /login, redirecting to /');
+        return redirect('/');
+      }
+    } else {
+      console.log('[middleware] No user or error:', userError?.message);
+      if (!isPublicPath) {
+        // 未認証 & 保護ルート → ログインページへリダイレクト
+        console.log('[middleware] Protected path, redirecting to /login');
+        return redirect('/login');
+      }
     }
-  } else if (!isPublicPath) {
-    // 未認証 & 保護ルート → ログインページへリダイレクト
-    return redirect('/login');
+  } catch (err) {
+    console.error('[middleware] Unexpected error:', err);
   }
 
+  console.log('[middleware] Proceeding to next...');
   return next();
 });
