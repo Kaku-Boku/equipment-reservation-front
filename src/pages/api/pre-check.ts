@@ -17,7 +17,7 @@ const JSON_HEADERS = { 'Content-Type': 'application/json' } as const;
 /** メールアドレスの基本バリデーション正規表現 */
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-export const POST: APIRoute = async ({ request, cookies }) => {
+export const POST: APIRoute = async ({ request, cookies, locals }) => {
   try {
     const body = await request.json();
     const email = body?.email?.trim()?.toLowerCase();
@@ -36,7 +36,8 @@ export const POST: APIRoute = async ({ request, cookies }) => {
       );
     }
 
-    const supabase = createSupabaseServerClient(cookies, request.headers);
+    const runtimeEnv = (locals as any).runtime?.env || {};
+    const supabase = createSupabaseServerClient(cookies, request.headers, runtimeEnv);
 
     // members テーブルで active なメンバーかチェック
     const { data: member, error } = await supabase

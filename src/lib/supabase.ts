@@ -17,12 +17,20 @@ import type { AstroCookies } from 'astro';
  *
  * @param cookies - Astro の Cookies API インスタンス
  * @param headers - リクエストヘッダー（Cookie 文字列の取得に使用）
+ * @param runtimeEnv - Cloudflare のランタイム環境変数 (Bindings)
  * @returns 認証セッション付きの Supabase クライアント
  */
-export function createSupabaseServerClient(cookies: AstroCookies, headers: Headers) {
+export function createSupabaseServerClient(
+  cookies: AstroCookies,
+  headers: Headers,
+  runtimeEnv?: any
+) {
+  const supabaseUrl = runtimeEnv?.PUBLIC_SUPABASE_URL || import.meta.env.PUBLIC_SUPABASE_URL;
+  const supabaseKey = runtimeEnv?.PUBLIC_SUPABASE_PUBLISHABLE_KEY || import.meta.env.PUBLIC_SUPABASE_PUBLISHABLE_KEY;
+
   return createServerClient(
-    import.meta.env.PUBLIC_SUPABASE_URL,
-    import.meta.env.PUBLIC_SUPABASE_PUBLISHABLE_KEY,
+    supabaseUrl,
+    supabaseKey,
     {
       cookies: {
         getAll() {

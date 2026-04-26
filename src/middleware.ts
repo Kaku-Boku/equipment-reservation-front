@@ -20,8 +20,11 @@ import { createSupabaseServerClient } from './lib/supabase';
 const PUBLIC_PATHS = ['/login', '/auth/callback', '/api/pre-check'];
 
 export const onRequest = defineMiddleware(async ({ locals, cookies, request, redirect }, next) => {
+  // Cloudflare Pages のランタイム環境変数を取得
+  const runtimeEnv = (locals as any).runtime?.env || {};
+
   // 全リクエストで Supabase サーバークライアントを生成
-  const supabase = createSupabaseServerClient(cookies, request.headers);
+  const supabase = createSupabaseServerClient(cookies, request.headers, runtimeEnv);
   locals.supabase = supabase;
   locals.session = null;
   locals.member = null;

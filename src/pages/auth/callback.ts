@@ -17,7 +17,7 @@
 import type { APIRoute } from 'astro';
 import { createSupabaseServerClient } from '../../lib/supabase';
 
-export const GET: APIRoute = async ({ request, cookies, redirect }) => {
+export const GET: APIRoute = async ({ request, cookies, redirect, locals }) => {
   const requestUrl = new URL(request.url);
   const code = requestUrl.searchParams.get('code');
 
@@ -28,7 +28,8 @@ export const GET: APIRoute = async ({ request, cookies, redirect }) => {
     return redirect('/login?error=no_code');
   }
 
-  const supabase = createSupabaseServerClient(cookies, request.headers);
+  const runtimeEnv = (locals as any).runtime?.env || {};
+  const supabase = createSupabaseServerClient(cookies, request.headers, runtimeEnv);
 
   // ── 1. 認可コード → セッション交換 ──
   const { data, error } = await supabase.auth.exchangeCodeForSession(code);
