@@ -7,7 +7,7 @@
   },
   "scripts": {
     "dev": "astro dev",
-    "build": "node -e \"const fs=require('fs'); fs.mkdirSync('dist/_worker.js', {recursive:true}); fs.writeFileSync('dist/_worker.js/index.js', '');\" && astro build",
+    "build": "astro build && node -e \"const fs=require('fs'); const c=JSON.parse(fs.readFileSync('wrangler.json')); c.main=fs.existsSync('./dist/_worker.js/index.js')?'./dist/_worker.js/index.js':'./dist/server/entry.mjs'; c.assets={binding:'ASSETS',directory:'./dist'}; fs.writeFileSync('wrangler.json', JSON.stringify(c, null, 2));\"",
     "preview": "astro preview",
     "astro": "astro",
     "generate-types": "wrangler types"
