@@ -7,7 +7,7 @@
   },
   "scripts": {
     "dev": "astro dev",
-    "build": "astro build && rm -rf dist/server/wrangler.json .wrangler",
+    "build": "astro build",
     "preview": "astro preview",
     "astro": "astro",
     "generate-types": "wrangler types"
