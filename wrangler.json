@@ -1,0 +1,10 @@
+
+{
+  "name": "equipment-reservation",
+  "compatibility_date": "2024-11-01",
+  "pages_build_output_dir": "./dist",
+  "compatibility_flags": [
+    "nodejs_compat"
+  ]
+}
+

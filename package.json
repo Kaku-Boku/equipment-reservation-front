@@ -13,12 +13,12 @@
     "generate-types": "wrangler types"
   },
   "dependencies": {
-    "@astrojs/cloudflare": "^13.1.10",
+    "@astrojs/cloudflare": "^13.2.1",
     "@astrojs/preact": "^5.1.2",
     "@supabase/ssr": "^0.10.2",
     "@supabase/supabase-js": "^2.103.3",
     "@tailwindcss/vite": "^4.2.2",
-    "astro": "^6.1.8",
+    "astro": "^6.1.9",
     "googleapis": "^171.4.0",
     "preact": "^10.29.1",
     "tailwindcss": "^4.2.2",
