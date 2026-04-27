@@ -11,6 +11,8 @@
  */
 import { createServerClient, parseCookieHeader } from '@supabase/ssr';
 import type { AstroCookies } from 'astro';
+// @ts-ignore
+import { env } from 'cloudflare:workers';
 
 /**
  * SSR 用 Supabase クライアントを生成する
@@ -23,15 +25,15 @@ import type { AstroCookies } from 'astro';
 export function createSupabaseServerClient(
   cookies: AstroCookies,
   headers: Headers,
-  runtimeEnv?: any
+  _runtimeEnv?: any
 ) {
-  const supabaseUrl = runtimeEnv?.PUBLIC_SUPABASE_URL || import.meta.env.PUBLIC_SUPABASE_URL;
-  const supabaseKey = runtimeEnv?.PUBLIC_SUPABASE_PUBLISHABLE_KEY || import.meta.env.PUBLIC_SUPABASE_PUBLISHABLE_KEY;
+  const supabaseUrl = (env as any)?.PUBLIC_SUPABASE_URL || import.meta.env.PUBLIC_SUPABASE_URL;
+  const supabaseKey = (env as any)?.PUBLIC_SUPABASE_PUBLISHABLE_KEY || import.meta.env.PUBLIC_SUPABASE_PUBLISHABLE_KEY;
 
   console.log('[supabase.ts] Creating server client:', {
     hasUrl: Boolean(supabaseUrl),
     hasKey: Boolean(supabaseKey),
-    urlSource: runtimeEnv?.PUBLIC_SUPABASE_URL ? 'runtimeEnv' : 'import.meta.env'
+    urlSource: (env as any)?.PUBLIC_SUPABASE_URL ? 'cloudflare:workers env' : 'import.meta.env'
   });
 
   return createServerClient(

@@ -25,13 +25,8 @@ const PUBLIC_PATHS = ['/login', '/auth/callback', '/api/pre-check'];
 export const onRequest = defineMiddleware(async ({ locals, cookies, request, redirect }, next) => {
   console.log('[middleware] Request started:', request.url);
   
-  // Cloudflare Pages のランタイム環境変数を取得
-  // @ts-ignore (型定義がない場合の暫定対応)
-  const runtimeEnv = locals.runtime?.env || {};
-  console.log('[middleware] runtimeEnv keys:', Object.keys(runtimeEnv));
-
   // 全リクエストで Supabase サーバークライアントを生成
-  const supabase = createSupabaseServerClient(cookies, request.headers, runtimeEnv);
+  const supabase = createSupabaseServerClient(cookies, request.headers, env);
   locals.supabase = supabase;
   locals.session = null;
   locals.member = null;
