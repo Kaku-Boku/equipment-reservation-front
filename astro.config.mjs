@@ -11,7 +11,8 @@ export default defineConfig({
   adapter: cloudflare({
     platformProxy: {
       enabled: true
-    }
+    },
+    compatibilityDate: '2026-04-18',
   }),
 
   vite: {
