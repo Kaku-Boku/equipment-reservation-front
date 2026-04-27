@@ -16,6 +16,8 @@
 import { defineMiddleware } from 'astro:middleware';
 // @ts-ignore
 import { createSupabaseServerClient } from './lib/supabase';
+// @ts-ignore
+import { env } from 'cloudflare:workers';
 
 /** 認証不要なパスのプレフィックス一覧 */
 const PUBLIC_PATHS = ['/login', '/auth/callback', '/api/pre-check'];

@@ -68,6 +68,7 @@ const member = Astro.locals.member;
         supabaseKey: SUPABASE_CONFIG.anonKey,
       }}
     >
+      console.log('[Layout.astro] Client-side script starting. Supabase URL:', supabaseUrl ? 'set' : 'missing');
       window.__SUPABASE_URL__ = supabaseUrl;
       window.__SUPABASE_ANON_KEY__ = supabaseKey;
     </script>
