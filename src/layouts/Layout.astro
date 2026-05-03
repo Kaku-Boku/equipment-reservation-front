@@ -73,7 +73,7 @@ const member = Astro.locals.member;
       window.__SUPABASE_ANON_KEY__ = supabaseKey;
     </script>
 
-    {showHeader && member && <Header memberName={member.name} />}
+    {showHeader && member && <Header memberName={member.name} memberRole={member.role} />}
     <main>
       <slot />
     </main>

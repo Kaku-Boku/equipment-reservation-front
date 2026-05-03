@@ -1,0 +1,45 @@
+---
+/**
+ * 管理者ダッシュボード
+ *
+ * middleware で管理者以外のアクセスをブロック済み。
+ * SSR で初期データを一括取得し AdminDashboard コンポーネントに渡す。
+ */
+import Layout from "../../layouts/Layout.astro";
+import { SUPABASE_CONFIG } from "../../lib/supabase";
+import AdminDashboard from "../../components/AdminDashboard";
+
+const { supabase, member } = Astro.locals;
+
+// ── 初期データ一括取得 ──
+const [
+  { data: settings },
+  { data: members },
+  { data: facilities },
+  { data: pendingReservations },
+] = await Promise.all([
+  supabase.from('app_settings').select('*').single(),
+  supabase.from('members').select('id, email, name, role, status, created_at').order('created_at', { ascending: false }),
+  supabase.from('facilities').select('id, name, description, status, created_at').order('name'),
+  supabase
+    .from('reservations')
+    .select('*, facilities:facility_id(id, name), created_by_member:created_by(id, name, email)')
+    .eq('status', 'pending')
+    .order('created_at', { ascending: true }),
+]);
+---
+
+<Layout title="システム管理 | 設備予約">
+  <div class="mx-auto max-w-screen-xl px-4 py-6 sm:px-6">
+    <AdminDashboard
+      client:load
+      initialSettings={settings}
+      initialMembers={members || []}
+      initialFacilities={facilities || []}
+      initialPendingReservations={pendingReservations || []}
+      currentMember={member}
+      supabaseUrl={SUPABASE_CONFIG.url}
+      supabaseKey={SUPABASE_CONFIG.anonKey}
+    />
+  </div>
+</Layout>

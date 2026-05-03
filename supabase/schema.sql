@@ -190,3 +190,156 @@ CREATE POLICY "自分のトークンのみ操作可能" ON user_tokens FOR ALL U
 -- → クライアント側で Supabase Realtime (postgres_changes) を購読し、
 --   UI を自動的に再描画する
 ALTER PUBLICATION supabase_realtime ADD TABLE reservations;
+
+
+-- ==========================================
+-- 6. 追加機能: アプリケーション設定管理
+-- ==========================================
+
+-- 一般設定テーブル（フロントエンドに公開しても安全な設定）
+CREATE TABLE app_settings (
+    id INT PRIMARY KEY DEFAULT 1 CHECK (id = 1), -- シングルトン設計（1行のみ）
+    start_hour INT NOT NULL DEFAULT 8,
+    end_hour INT NOT NULL DEFAULT 20,
+    reservation_lead_time_days INT NOT NULL DEFAULT 90, -- 予約可能日数
+    max_reservation_hours INT NOT NULL DEFAULT 8,
+    min_reservation_minutes INT NOT NULL DEFAULT 10,
+    auto_approve BOOLEAN NOT NULL DEFAULT true,
+    shared_calendar_enabled BOOLEAN NOT NULL DEFAULT false,
+    shared_calendar_email TEXT, -- 連携中のアカウント表示用
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+INSERT INTO app_settings (id) VALUES (1);
+
+-- 秘密設定テーブル（絶対にフロントエンドに渡さない機密情報）
+CREATE TABLE app_secrets (
+    id INT PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+    shared_calendar_refresh_token TEXT,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+INSERT INTO app_secrets (id) VALUES (1);
+
+-- RLSの設定
+ALTER TABLE app_settings ENABLE ROW LEVEL SECURITY;
+ALTER TABLE app_secrets ENABLE ROW LEVEL SECURITY;
+
+-- アプリ設定はログイン済みの全ユーザーが閲覧可能（UI描画に必要）
+CREATE POLICY "設定は認証ユーザー閲覧可能" ON app_settings FOR SELECT USING (auth.role() = 'authenticated');
+-- 更新は管理者のみ
+CREATE POLICY "設定の更新は管理者のみ" ON app_settings FOR UPDATE USING (is_admin());
+
+-- 秘密設定は誰もSELECTできない（Edge FunctionがService Roleキーで強制取得する）
+-- ただし、管理者は新しいトークンのUPDATE（上書き）のみ可能とする
+CREATE POLICY "秘密情報の更新は管理者のみ" ON app_secrets FOR UPDATE USING (is_admin());
+
+
+-- ==========================================
+-- 7. 追加機能: 予約テーブルの拡張
+-- ==========================================
+
+-- 共有カレンダーイベントIDと承認ステータスの追加
+ALTER TABLE reservations ADD COLUMN shared_event_id TEXT;
+ALTER TABLE reservations ADD COLUMN status TEXT NOT NULL DEFAULT 'approved' CHECK (status IN ('pending', 'approved', 'rejected'));
+
+
+-- ==========================================
+-- 8. 追加機能: 操作ログ（証跡管理）
+-- ==========================================
+
+-- ログテーブル
+CREATE TABLE reservation_logs (
+    id UUID DEFAULT uuid_generate_v7() PRIMARY KEY,
+    reservation_id UUID NOT NULL, -- 削除されても履歴が残るよう外部キー制約(REFERENCES)はあえて付けない
+    action TEXT NOT NULL CHECK (action IN ('INSERT', 'UPDATE', 'DELETE')),
+    changed_by UUID, -- 操作者のメンバーID
+    old_data JSONB,
+    new_data JSONB,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+ALTER TABLE reservation_logs ENABLE ROW LEVEL SECURITY;
+-- ログは管理者のみ閲覧可能、変更・削除は誰にも許可しない（完全なイミュータブル）
+CREATE POLICY "ログの閲覧は管理者のみ" ON reservation_logs FOR SELECT USING (is_admin());
+
+
+-- ==========================================
+-- 9. データベース・トリガーによる強力な制約と自動ログ処理
+-- ==========================================
+
+-- トリガー関数①：時間経過による変更・削除のロック（バックエンドでの強制防御）
+CREATE OR REPLACE FUNCTION enforce_reservation_time_lock()
+RETURNS TRIGGER AS $$
+BEGIN
+    -- 管理者による操作、またはシステム(Service Role)の操作はロックを免除
+    IF is_admin() OR auth.role() = 'service_role' THEN
+        IF TG_OP = 'DELETE' THEN RETURN OLD; END IF;
+        RETURN NEW;
+    END IF;
+
+    -- DELETE 時の検証
+    IF TG_OP = 'DELETE' THEN
+        -- 開始から1時間経過で削除不可
+        IF NOW() > OLD.start_time + INTERVAL '1 hour' THEN
+            RAISE EXCEPTION '開始時刻から1時間以上経過した予約は削除できません。';
+        END IF;
+        RETURN OLD;
+    END IF;
+
+    -- UPDATE 時の検証
+    IF TG_OP = 'UPDATE' THEN
+        -- 終了時刻から1時間経過ですべての変更不可
+        IF NOW() > OLD.end_time + INTERVAL '1 hour' THEN
+            RAISE EXCEPTION '終了時刻から1時間以上経過した予約は変更できません。';
+        END IF;
+
+        -- 開始時刻から1時間経過で「開始時刻そのもの」の変更不可
+        IF NOW() > OLD.start_time + INTERVAL '1 hour' THEN
+            IF NEW.start_time IS DISTINCT FROM OLD.start_time THEN
+                RAISE EXCEPTION '開始時刻から1時間以上経過したため、開始時刻は変更できません。';
+            END IF;
+        END IF;
+
+        RETURN NEW;
+    END IF;
+    
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- トリガーの登録 (UPDATE と DELETE の前に実行)
+CREATE TRIGGER trigger_enforce_time_lock
+BEFORE UPDATE OR DELETE ON reservations
+FOR EACH ROW EXECUTE FUNCTION enforce_reservation_time_lock();
+
+
+-- トリガー関数②：操作ログの自動記録
+-- APIや直接のSQL実行など、どこから変更されても確実にログを残す
+CREATE OR REPLACE FUNCTION log_reservation_changes()
+RETURNS TRIGGER AS $$
+DECLARE
+    current_member_id UUID;
+BEGIN
+    -- 現在操作しているユーザーのIDを取得
+    SELECT id INTO current_member_id FROM members WHERE email = auth.jwt()->>'email';
+
+    IF TG_OP = 'INSERT' THEN
+        INSERT INTO reservation_logs (reservation_id, action, changed_by, new_data)
+        VALUES (NEW.id, 'INSERT', current_member_id, row_to_json(NEW)::jsonb);
+        RETURN NEW;
+    ELSIF TG_OP = 'UPDATE' THEN
+        INSERT INTO reservation_logs (reservation_id, action, changed_by, old_data, new_data)
+        VALUES (NEW.id, 'UPDATE', current_member_id, row_to_json(OLD)::jsonb, row_to_json(NEW)::jsonb);
+        RETURN NEW;
+    ELSIF TG_OP = 'DELETE' THEN
+        INSERT INTO reservation_logs (reservation_id, action, changed_by, old_data)
+        VALUES (OLD.id, 'DELETE', current_member_id, row_to_json(OLD)::jsonb);
+        RETURN OLD;
+    END IF;
+    RETURN NULL;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- トリガーの登録 (INSERT, UPDATE, DELETE の後に実行)
+CREATE TRIGGER trigger_log_reservation_changes
+AFTER INSERT OR UPDATE OR DELETE ON reservations
+FOR EACH ROW EXECUTE FUNCTION log_reservation_changes();

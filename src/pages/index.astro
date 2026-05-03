@@ -5,19 +5,36 @@
  * SSR で初期データを一括フェッチし、Preact の ReservationApp に
  * ハイドレーション用データとして渡す。
  *
- * フェッチ範囲: 先月1日 〜 2ヶ月後の末日
- * → 初期表示で通信ゼロ、月移動時に必要なら追加取得
+ * フェッチ範囲（過去方向）: 先月1日
+ * フェッチ範囲（未来方向）: 以下の小さい方
+ *   - 2ヶ月後の末日（固定上限）
+ *   - app_settings.reservation_lead_time_days 日後（設定上限）
+ *   ※ 管理者は固定上限のみ（設定上限を無視）
  */
 import Layout from "../layouts/Layout.astro";
 import { SUPABASE_CONFIG } from "../lib/supabase";
 import ReservationApp from "../components/ReservationApp";
+import { DEFAULT_APP_SETTINGS } from "../lib/types";
 
 const { supabase, member } = Astro.locals;
-console.log('[index.astro] Page started. Member:', member?.name);
+const isAdmin = member?.role === 'admin';
+
+console.log('[index.astro] Page started. Member:', member?.name, 'isAdmin:', isAdmin);
 
 if (!supabase) {
   console.error('[index.astro] Supabase client is missing in Astro.locals!');
 }
+
+// ── app_settings のフェッチ ──
+const { data: appSettingsData, error: settingsError } = await supabase
+  .from('app_settings')
+  .select('*')
+  .single();
+
+if (settingsError) {
+  console.warn('[index.astro] app_settings フェッチ失敗、デフォルト値を使用:', settingsError.message);
+}
+const appSettings = appSettingsData || DEFAULT_APP_SETTINGS;
 
 // ── 初期データの取得範囲を算出 ──
 const today = new Date();
@@ -26,29 +43,46 @@ const initialStart = new Date(
   today.getMonth() - 1,
   1,
 ).toISOString();
-const initialEnd = new Date(
-  today.getFullYear(),
-  today.getMonth() + 3,
-  0,
-).toISOString();
+
+// 未来方向: 2ヶ月後の末日 と reservation_lead_time_days を比較し、短い方を採用
+// 管理者は常に2ヶ月後を上限とする（設定制限を無効化）
+const twoMonthsLater = new Date(today.getFullYear(), today.getMonth() + 3, 0);
+let fetchEndDate = twoMonthsLater;
+
+if (!isAdmin && appSettings.reservation_lead_time_days > 0) {
+  const leadTimeEnd = new Date(today);
+  leadTimeEnd.setDate(leadTimeEnd.getDate() + appSettings.reservation_lead_time_days);
+  if (leadTimeEnd < twoMonthsLater) {
+    fetchEndDate = leadTimeEnd;
+  }
+}
+const initialEnd = fetchEndDate.toISOString();
+
+console.log('[index.astro] Fetch range:', {
+  start: initialStart,
+  end: initialEnd,
+  leadTimeDays: appSettings.reservation_lead_time_days,
+  isAdmin,
+});
 
 // ── サーバーサイドで一括フェッチ ──
 
-// 予約データ（JOIN 付き）
+// 予約データ（JOIN 付き・status カラムも含む）
 const { data: initialReservations } = await supabase
   .from("reservations")
   .select(
-    "*, facilities:facility_id (id, name), created_by_member:created_by (id, name)",
+    "*, facilities:facility_id (id, name, status), created_by_member:created_by (id, name)",
   )
   .gte("start_time", initialStart)
   .lte("end_time", initialEnd)
   .order("start_time", { ascending: true });
 
-// 設備マスタ
+// 設備マスタ（active + maintenance を取得、retired は除外）
+// ※ timeline では maintenance 設備もグレーアウト表示するため retired のみ除外
 const { data: facilities } = await supabase
   .from("facilities")
-  .select("id, name")
-  .eq("status", "active")
+  .select("id, name, status")
+  .neq("status", "retired")
   .order("name");
 
 // メンバー一覧（参加者選択用）
@@ -62,7 +96,7 @@ console.log('[index.astro] Data fetch complete:', {
   reservationsCount: initialReservations?.length || 0,
   facilitiesCount: facilities?.length || 0,
   membersCount: members?.length || 0,
-  hasErrors: Boolean(membersError)
+  hasErrors: Boolean(membersError),
 });
 ---
 
@@ -77,5 +111,6 @@ console.log('[index.astro] Data fetch complete:', {
     currentMember={member}
     supabaseUrl={SUPABASE_CONFIG.url}
     supabaseKey={SUPABASE_CONFIG.anonKey}
+    appSettings={appSettings}
   />
 </Layout>

@@ -336,6 +336,80 @@ export async function syncWithGoogleCalendar(
 }
 
 // ===========================================
+//  共有カレンダー同期
+// ===========================================
+
+/**
+ * 共有カレンダーにイベントを同期する
+ *
+ * app_secrets テーブルから shared_calendar_refresh_token を
+ * Service Role Key（RLS バイパス）で取得し、共有カレンダーに書き込む。
+ *
+ * @param action   - 'create' | 'update' | 'delete'
+ * @param data     - イベントデータ
+ * @param adminClient - Service Role Key を使う Supabase クライアント
+ * @param env      - Google OAuth の環境変数
+ */
+export async function syncSharedCalendar(
+  action: 'create' | 'update' | 'delete',
+  data: CalendarSyncData,
+  adminClient: SupabaseClient,
+  env: CalendarEnv = {}
+): Promise<CalendarSyncResult> {
+  if (!isGoogleCalendarConfigured(env)) {
+    return { eventId: data.eventId || null, synced: false, error: '環境変数未設定' };
+  }
+
+  try {
+    // app_secrets から共有カレンダーの refresh_token を取得
+    const { data: secrets, error: secretsError } = await adminClient
+      .from('app_secrets')
+      .select('shared_calendar_refresh_token')
+      .single();
+
+    if (secretsError || !secrets?.shared_calendar_refresh_token) {
+      return { eventId: data.eventId || null, synced: false, error: '共有カレンダートークン未設定' };
+    }
+
+    const accessToken = await getAccessToken(secrets.shared_calendar_refresh_token, env);
+    if (!accessToken) {
+      return { eventId: data.eventId || null, synced: false, error: '共有カレンダーaccess_token取得失敗' };
+    }
+
+    switch (action) {
+      case 'create': {
+        const eventId = await createCalendarEvent(accessToken, data);
+        if (eventId) {
+          console.log('[SharedCalendar] イベント作成成功:', eventId);
+          return { eventId, synced: true };
+        }
+        return { eventId: null, synced: false, error: '共有カレンダーイベント作成失敗' };
+      }
+      case 'update': {
+        if (!data.eventId) {
+          const eventId = await createCalendarEvent(accessToken, data);
+          return eventId
+            ? { eventId, synced: true }
+            : { eventId: null, synced: false, error: '共有カレンダーフォールバック作成失敗' };
+        }
+        const updated = await updateCalendarEvent(accessToken, data.eventId, data);
+        return { eventId: data.eventId, synced: updated };
+      }
+      case 'delete': {
+        if (!data.eventId) return { eventId: null, synced: false };
+        const deleted = await deleteCalendarEvent(accessToken, data.eventId);
+        return { eventId: null, synced: deleted };
+      }
+      default:
+        return { eventId: null, synced: false, error: `不明なアクション: ${action}` };
+    }
+  } catch (error) {
+    console.error('[SharedCalendar] 同期エラー:', error);
+    return { eventId: data.eventId || null, synced: false, error: String(error) };
+  }
+}
+
+// ===========================================
 //  NOTE: トークンの保存処理について
 // ===========================================
 //

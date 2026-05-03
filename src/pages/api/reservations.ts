@@ -43,7 +43,8 @@ export const GET: APIRoute = async ({ request, locals }) => {
           memo,
           notice,
           event_id,
-          facilities (id, name),
+          status,
+          facilities (id, name, status),
           created_by_member:members!reservations_created_by_fkey (id, name, email),
           reservation_participants (members (id, name))
         `)
@@ -73,7 +74,7 @@ export const GET: APIRoute = async ({ request, locals }) => {
 
       const { data: reservations, error } = await supabase
         .from('reservations')
-        .select('id, start_time, facilities (id, name)')
+        .select('id, start_time, status, facilities (id, name, status)')
         .gte('start_time', monthStart)
         .lte('start_time', monthEnd)
         .order('start_time');

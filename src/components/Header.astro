@@ -5,13 +5,16 @@
  * - アプリタイトル（ロゴ + テキスト）
  * - テーマ切替ボタン（Light ↔ Dark）
  * - ログインユーザー名 + アバター
+ * - 管理者の場合: ⚙️ システム管理 リンク
  * - ログアウトボタン
  */
 interface Props {
   memberName: string;
+  memberRole?: 'admin' | 'user';
 }
 
-const { memberName } = Astro.props;
+const { memberName, memberRole } = Astro.props;
+const isAdmin = memberRole === 'admin';
 ---
 
 <header
@@ -46,7 +49,7 @@ const { memberName } = Astro.props;
       <span class="hidden sm:inline">設備予約</span>
     </a>
 
-    <!-- 右側: テーマ切替 + ユーザー情報 -->
+    <!-- 右側: ナビゲーション -->
     <div class="flex items-center gap-2 sm:gap-3">
 
       <!-- テーマ切替ボタン -->
@@ -56,11 +59,9 @@ const { memberName } = Astro.props;
         title="テーマ切替"
         aria-label="テーマを切り替える"
       >
-        <!-- Light時に表示: 月アイコン（Darkへ切替） -->
         <svg id="icon-moon" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
         </svg>
-        <!-- Dark時に表示: 太陽アイコン（Lightへ切替） -->
         <svg id="icon-sun" class="h-4 w-4 hidden" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <circle cx="12" cy="12" r="5"></circle>
           <line x1="12" y1="1" x2="12" y2="3"></line>
@@ -73,6 +74,37 @@ const { memberName } = Astro.props;
           <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
         </svg>
       </button>
+
+      <!-- 管理者: システム管理リンク -->
+      {isAdmin && (
+        <a
+          href="/admin"
+          class="hidden sm:flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-all hover:shadow-sm no-underline"
+          style="
+            border-color: oklch(0.55 0.21 250 / 0.3);
+            background: oklch(0.55 0.21 250 / 0.06);
+            color: var(--color-primary-500);
+          "
+        >
+          <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="3"></circle>
+            <path d="M19.07 4.93l-1.41 1.41M5.34 18.66l-1.41 1.41M20.49 12H22M2 12h1.51M19.07 19.07l-1.41-1.41M5.34 5.34 3.93 3.93M12 20.49V22M12 2v1.51"></path>
+          </svg>
+          システム管理
+        </a>
+        <!-- モバイル用: アイコンのみ -->
+        <a
+          href="/admin"
+          class="sm:hidden nav-btn"
+          title="システム管理"
+          aria-label="システム管理"
+        >
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="3"></circle>
+            <path d="M19.07 4.93l-1.41 1.41M5.34 18.66l-1.41 1.41M20.49 12H22M2 12h1.51M19.07 19.07l-1.41-1.41M5.34 5.34 3.93 3.93M12 20.49V22M12 2v1.51"></path>
+          </svg>
+        </a>
+      )}
 
       <!-- ユーザーアバター + 名前 -->
       <div class="flex items-center gap-2">
@@ -114,17 +146,14 @@ const { memberName } = Astro.props;
   const iconMoon = document.getElementById('icon-moon');
   const iconSun  = document.getElementById('icon-sun');
 
-  /** 現在のテーマに合わせてアイコンの表示を同期する */
   function syncThemeIcons() {
     const current = document.documentElement.getAttribute('data-theme') || 'light';
     if (iconMoon && iconSun) {
-      // Light → 月アイコン表示, Dark → 太陽アイコン表示
       iconMoon.classList.toggle('hidden', current === 'dark');
       iconSun.classList.toggle('hidden',  current === 'light');
     }
   }
 
-  // ページ読み込み時にアイコンを初期同期
   syncThemeIcons();
 
   themeBtn?.addEventListener('click', () => {

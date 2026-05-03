@@ -6,47 +6,38 @@
  * - edit:   既存予約の編集（作成者 or admin）
  * - view:   閲覧専用（他ユーザーの予約）
  *
- * フォームフィールド:
- * - 目的・用途 *（必須）
- * - 設備 *（必須）
- * - 日付 *（必須）
- * - 開始時間 / 終了時間 *（必須）
- * - メモ（任意）
- * - 連絡事項（任意）
- * - 参加者（任意: 複数選択）
- *
  * バリデーション:
- * - 必須フィールドの入力チェック
- * - 終了時間 > 開始時間 の前後関係チェック
+ * - min_reservation_minutes の倍数チェック
+ * - max_reservation_hours 上限チェック
+ *
+ * 過去データロックUI（管理者は免除）:
+ * - now > start_time + 1h: 開始時刻変更・削除ボタン disabled
+ * - now > end_time + 1h:   全フィールド read-only
+ *
+ * 管理者向け承認/却下ボタン（status === 'pending' の編集モード時）
  */
 import { useState, useEffect } from 'preact/hooks';
+import type { AppSettings, Member, Facility } from '../lib/types';
 
-/** メンバー情報 */
-interface MemberOption {
-  id: string;
-  name: string;
+interface MemberOption extends Member {
   email: string;
 }
 
-/** 設備情報 */
-interface FacilityOption {
-  id: string;
-  name: string;
-}
-
-/** コンポーネント Props */
 interface ModalProps {
   isOpen: boolean;
   mode: 'create' | 'edit' | 'view';
   initialData: any;
-  facilities: FacilityOption[];
+  facilities: Facility[];
   members: MemberOption[];
+  currentMember: Member;
+  appSettings: AppSettings;
   onClose: () => void;
   onSave: (data: any) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
+  onApprove: (id: string) => Promise<void>;
+  onReject: (id: string) => Promise<void>;
 }
 
-/** フォームの状態 */
 interface FormState {
   id: string;
   purpose: string;
@@ -65,25 +56,23 @@ export default function ReservationModal({
   initialData,
   facilities,
   members,
+  currentMember,
+  appSettings,
   onClose,
   onSave,
   onDelete,
+  onApprove,
+  onReject,
 }: ModalProps) {
   const [formData, setFormData] = useState<FormState>({
-    id: '',
-    purpose: '',
-    facility_id: '',
-    date: '',
-    start_time: '',
-    end_time: '',
-    memo: '',
-    notice: '',
-    participant_ids: [],
+    id: '', purpose: '', facility_id: '', date: '',
+    start_time: '', end_time: '', memo: '', notice: '', participant_ids: [],
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
 
-  // モーダルが開くたびに初期データをセット
+  const isAdmin = currentMember?.role === 'admin';
+
   useEffect(() => {
     if (isOpen && initialData) {
       setFormData({
@@ -103,7 +92,26 @@ export default function ReservationModal({
 
   if (!isOpen) return null;
 
-  const isReadOnly = mode === 'view';
+  // ── 時間ロック判定（管理者は常にフル操作可） ──
+  const now = new Date();
+  let startTimeLocked = false; // 開始時刻変更・削除が disabled
+  let fullyLocked = false;     // 全フィールド read-only
+
+  if (!isAdmin && initialData?.original_start_time) {
+    const startDt = new Date(initialData.original_start_time);
+    const endDt = initialData.original_end_time ? new Date(initialData.original_end_time) : null;
+    if (now > new Date(startDt.getTime() + 60 * 60 * 1000)) {
+      startTimeLocked = true;
+    }
+    if (endDt && now > new Date(endDt.getTime() + 60 * 60 * 1000)) {
+      fullyLocked = true;
+    }
+  }
+
+  const isReadOnly = mode === 'view' || (fullyLocked && !isAdmin);
+  const disableStartTime = isReadOnly || (startTimeLocked && !isAdmin);
+  const disableDelete = isReadOnly || (startTimeLocked && !isAdmin);
+  const isPending = initialData?.status === 'pending';
 
   /** 入力バリデーション */
   const validate = (): string | null => {
@@ -112,23 +120,36 @@ export default function ReservationModal({
     if (!formData.date) return '日付を選択してください。';
     if (!formData.start_time) return '開始時間を入力してください。';
     if (!formData.end_time) return '終了時間を入力してください。';
-    if (formData.start_time >= formData.end_time) {
-      return '終了時間は開始時間より後に設定してください。';
+    if (formData.start_time >= formData.end_time) return '終了時間は開始時間より後に設定してください。';
+
+    // 予約時間の計算
+    const [sh, sm] = formData.start_time.split(':').map(Number);
+    const [eh, em] = formData.end_time.split(':').map(Number);
+    const durationMin = (eh * 60 + em) - (sh * 60 + sm);
+
+    // min_reservation_minutes の倍数チェック
+    const minUnit = appSettings.min_reservation_minutes;
+    if (durationMin < minUnit) {
+      return `予約時間は最低 ${minUnit} 分以上必要です。`;
     }
+    if (durationMin % minUnit !== 0) {
+      return `予約時間は ${minUnit} 分単位で設定してください（例: ${minUnit}, ${minUnit * 2}, ${minUnit * 3}分...）。`;
+    }
+
+    // max_reservation_hours 上限チェック
+    const maxMin = appSettings.max_reservation_hours * 60;
+    if (durationMin > maxMin) {
+      return `1回あたりの予約は最大 ${appSettings.max_reservation_hours} 時間までです。`;
+    }
+
     return null;
   };
 
-  /** フォーム送信 */
   const handleSubmit = async (e: Event) => {
     e.preventDefault();
     setErrorMessage('');
-
     const validationError = validate();
-    if (validationError) {
-      setErrorMessage(validationError);
-      return;
-    }
-
+    if (validationError) { setErrorMessage(validationError); return; }
     setIsSubmitting(true);
     try {
       await onSave(formData);
@@ -140,10 +161,8 @@ export default function ReservationModal({
     }
   };
 
-  /** 予約削除 */
   const handleDelete = async () => {
     if (!confirm('本当にこの予約を削除しますか？')) return;
-
     setIsSubmitting(true);
     setErrorMessage('');
     try {
@@ -156,7 +175,33 @@ export default function ReservationModal({
     }
   };
 
-  /** 参加者の選択/解除をトグル */
+  const handleApprove = async () => {
+    setIsSubmitting(true);
+    setErrorMessage('');
+    try {
+      await onApprove(formData.id);
+      onClose();
+    } catch (error: any) {
+      setErrorMessage(error?.message || '承認に失敗しました。');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleReject = async () => {
+    if (!confirm('この予約を却下しますか？')) return;
+    setIsSubmitting(true);
+    setErrorMessage('');
+    try {
+      await onReject(formData.id);
+      onClose();
+    } catch (error: any) {
+      setErrorMessage(error?.message || '却下に失敗しました。');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
   const toggleParticipant = (memberId: string) => {
     setFormData(prev => {
       const ids = prev.participant_ids.includes(memberId)
@@ -166,7 +211,6 @@ export default function ReservationModal({
     });
   };
 
-  /** フィールド更新ヘルパー */
   const updateField = (field: keyof FormState, value: string) => {
     setFormData(prev => ({ ...prev, [field]: value }));
   };
@@ -185,14 +229,29 @@ export default function ReservationModal({
       >
         {/* ── ヘッダー ── */}
         <div className="flex items-center justify-between mb-5">
-          <h2 className="text-xl font-bold" style={{ color: 'var(--theme-text)' }}>
-            {titleText}
-          </h2>
-          <button
-            onClick={onClose}
-            className="nav-btn !w-8 !h-8"
-            aria-label="閉じる"
-          >
+          <div className="flex items-center gap-2">
+            <h2 className="text-xl font-bold" style={{ color: 'var(--theme-text)' }}>
+              {titleText}
+            </h2>
+            {/* ステータスバッジ */}
+            {isPending && (
+              <span
+                className="text-xs font-semibold px-2 py-0.5 rounded-full"
+                style={{ background: 'oklch(0.65 0.18 60 / 0.15)', color: 'oklch(0.50 0.18 60)' }}
+              >
+                保留中
+              </span>
+            )}
+            {initialData?.status === 'rejected' && (
+              <span
+                className="text-xs font-semibold px-2 py-0.5 rounded-full"
+                style={{ background: 'oklch(0.62 0.22 25 / 0.1)', color: 'var(--color-danger-500)' }}
+              >
+                却下済み
+              </span>
+            )}
+          </div>
+          <button onClick={onClose} className="nav-btn !w-8 !h-8" aria-label="閉じる">
             <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <line x1="18" y1="6" x2="6" y2="18" />
               <line x1="6" y1="6" x2="18" y2="18" />
@@ -200,16 +259,24 @@ export default function ReservationModal({
           </button>
         </div>
 
-        {/* ── エラーメッセージ ── */}
+        {/* ロックUI の説明 */}
+        {fullyLocked && !isAdmin && (
+          <div className="mb-4 rounded-lg px-4 py-3 text-sm animate-fade-in"
+            style={{ background: 'var(--theme-input-bg)', border: '1px solid var(--theme-card-border)', color: 'var(--theme-text-secondary)' }}>
+            🔒 終了から1時間以上経過した予約は変更できません。
+          </div>
+        )}
+        {startTimeLocked && !fullyLocked && !isAdmin && (
+          <div className="mb-4 rounded-lg px-4 py-3 text-sm animate-fade-in"
+            style={{ background: 'var(--theme-input-bg)', border: '1px solid var(--theme-card-border)', color: 'var(--theme-text-secondary)' }}>
+            🔒 開始から1時間以上経過したため、開始時刻の変更と削除は制限されています。
+          </div>
+        )}
+
+        {/* エラーメッセージ */}
         {errorMessage && (
-          <div
-            className="mb-4 rounded-lg px-4 py-3 text-sm font-medium animate-fade-in"
-            style={{
-              background: 'oklch(0.62 0.22 25 / 0.08)',
-              color: 'var(--color-danger-500)',
-              border: '1px solid oklch(0.62 0.22 25 / 0.2)',
-            }}
-          >
+          <div className="mb-4 rounded-lg px-4 py-3 text-sm font-medium animate-fade-in"
+            style={{ background: 'oklch(0.62 0.22 25 / 0.08)', color: 'var(--color-danger-500)', border: '1px solid oklch(0.62 0.22 25 / 0.2)' }}>
             {errorMessage}
           </div>
         )}
@@ -217,26 +284,22 @@ export default function ReservationModal({
         {/* ── フォーム ── */}
         <form onSubmit={handleSubmit} className="space-y-4">
 
-          {/* 目的・用途（必須） */}
+          {/* 目的・用途 */}
           <div>
             <label className="form-label form-label-required">目的・用途</label>
             <input
-              type="text"
-              required
-              disabled={isReadOnly}
+              type="text" required disabled={isReadOnly}
               value={formData.purpose}
               onInput={(e) => updateField('purpose', (e.target as HTMLInputElement).value)}
-              className="form-input"
-              placeholder="例: チームミーティング"
+              className="form-input" placeholder="例: チームミーティング"
             />
           </div>
 
-          {/* 設備（必須） */}
+          {/* 設備 */}
           <div>
             <label className="form-label form-label-required">設備</label>
             <select
-              required
-              disabled={isReadOnly}
+              required disabled={isReadOnly}
               value={formData.facility_id}
               onChange={(e) => updateField('facility_id', (e.target as HTMLSelectElement).value)}
               className="form-input"
@@ -247,37 +310,33 @@ export default function ReservationModal({
             </select>
           </div>
 
-          {/* 日付と時間（必須） */}
+          {/* 日付 */}
           <div>
             <label className="form-label form-label-required">日付</label>
             <input
-              type="date"
-              required
-              disabled={isReadOnly}
+              type="date" required disabled={isReadOnly}
               value={formData.date}
               onInput={(e) => updateField('date', (e.target as HTMLInputElement).value)}
               className="form-input"
             />
           </div>
 
+          {/* 時間 */}
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="form-label form-label-required">開始時間</label>
               <input
-                type="time"
-                required
-                disabled={isReadOnly}
+                type="time" required disabled={disableStartTime}
                 value={formData.start_time}
                 onInput={(e) => updateField('start_time', (e.target as HTMLInputElement).value)}
                 className="form-input"
+                style={disableStartTime && !isReadOnly ? { opacity: 0.5 } : undefined}
               />
             </div>
             <div>
               <label className="form-label form-label-required">終了時間</label>
               <input
-                type="time"
-                required
-                disabled={isReadOnly}
+                type="time" required disabled={isReadOnly}
                 value={formData.end_time}
                 onInput={(e) => updateField('end_time', (e.target as HTMLInputElement).value)}
                 className="form-input"
@@ -285,7 +344,14 @@ export default function ReservationModal({
             </div>
           </div>
 
-          {/* ── 任意フィールドの区切り ── */}
+          {/* 予約単位のヒント */}
+          {!isReadOnly && (
+            <p className="text-xs" style={{ color: 'var(--theme-text-secondary)', marginTop: '-8px' }}>
+              ※ {appSettings.min_reservation_minutes}分単位 / 最大{appSettings.max_reservation_hours}時間
+            </p>
+          )}
+
+          {/* 任意フィールド区切り */}
           <div className="pt-2">
             <p className="text-xs font-medium mb-3" style={{ color: 'var(--theme-text-secondary)' }}>
               以下は任意項目です
@@ -293,35 +359,29 @@ export default function ReservationModal({
             <hr style={{ borderColor: 'var(--theme-card-border)' }} />
           </div>
 
-          {/* メモ（任意） */}
+          {/* メモ */}
           <div>
             <label className="form-label">メモ</label>
             <textarea
-              disabled={isReadOnly}
-              value={formData.memo}
+              disabled={isReadOnly} value={formData.memo}
               onInput={(e) => updateField('memo', (e.target as HTMLTextAreaElement).value)}
-              className="form-input"
-              rows={2}
-              placeholder="自由にメモを残せます"
+              className="form-input" rows={2} placeholder="自由にメモを残せます"
               style={{ resize: 'vertical', minHeight: '60px' }}
             />
           </div>
 
-          {/* 連絡事項（任意） */}
+          {/* 連絡事項 */}
           <div>
             <label className="form-label">連絡事項</label>
             <textarea
-              disabled={isReadOnly}
-              value={formData.notice}
+              disabled={isReadOnly} value={formData.notice}
               onInput={(e) => updateField('notice', (e.target as HTMLTextAreaElement).value)}
-              className="form-input"
-              rows={2}
-              placeholder="参加者に伝えたいことがあれば"
+              className="form-input" rows={2} placeholder="参加者に伝えたいことがあれば"
               style={{ resize: 'vertical', minHeight: '60px' }}
             />
           </div>
 
-          {/* 参加者（任意: 複数選択） */}
+          {/* 参加者 */}
           <div>
             <label className="form-label">参加者</label>
             <div
@@ -346,18 +406,12 @@ export default function ReservationModal({
                         }}
                       >
                         <input
-                          type="checkbox"
-                          disabled={isReadOnly}
-                          checked={isSelected}
+                          type="checkbox" disabled={isReadOnly} checked={isSelected}
                           onChange={() => toggleParticipant(m.id)}
                           className="rounded text-primary-500 focus:ring-primary-500"
                         />
-                        <span className="text-sm" style={{ color: 'var(--theme-text)' }}>
-                          {m.name}
-                        </span>
-                        <span className="text-xs ml-auto" style={{ color: 'var(--theme-text-secondary)' }}>
-                          {m.email}
-                        </span>
+                        <span className="text-sm" style={{ color: 'var(--theme-text)' }}>{m.name}</span>
+                        <span className="text-xs ml-auto" style={{ color: 'var(--theme-text-secondary)' }}>{m.email}</span>
                       </label>
                     );
                   })}
@@ -368,20 +422,38 @@ export default function ReservationModal({
 
           {/* ── アクションボタン ── */}
           <div
-            className="flex justify-end gap-3 pt-4 mt-2"
+            className="flex flex-wrap justify-end gap-3 pt-4 mt-2"
             style={{ borderTop: '1px solid var(--theme-card-border)' }}
           >
-            {/* 編集モード: 削除ボタン（左寄せ） */}
+            {/* 管理者向け承認/却下ボタン */}
+            {isAdmin && isPending && mode === 'edit' && (
+              <>
+                <button
+                  type="button" onClick={handleReject} disabled={isSubmitting}
+                  className="px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+                  style={{ color: 'var(--color-danger-500)', background: 'oklch(0.62 0.22 25 / 0.06)' }}
+                >
+                  却下
+                </button>
+                <button
+                  type="button" onClick={handleApprove} disabled={isSubmitting}
+                  className="px-4 py-2 rounded-lg text-sm font-semibold text-white transition-all"
+                  style={{ background: 'linear-gradient(135deg, oklch(0.55 0.18 145), oklch(0.50 0.16 155))' }}
+                >
+                  {isSubmitting ? '処理中...' : '承認'}
+                </button>
+                <div className="w-full h-0" />
+              </>
+            )}
+
+            {/* 削除ボタン */}
             {mode === 'edit' && (
               <button
-                type="button"
-                onClick={handleDelete}
-                disabled={isSubmitting}
-                className="mr-auto px-4 py-2 rounded-lg text-sm font-medium transition-colors"
-                style={{
-                  color: 'var(--color-danger-500)',
-                  background: 'oklch(0.62 0.22 25 / 0.06)',
-                }}
+                type="button" onClick={handleDelete}
+                disabled={isSubmitting || disableDelete}
+                className="mr-auto px-4 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-30"
+                style={{ color: 'var(--color-danger-500)', background: 'oklch(0.62 0.22 25 / 0.06)' }}
+                title={disableDelete && !isAdmin ? '開始から1時間以上経過した予約は削除できません' : undefined}
               >
                 削除
               </button>
@@ -389,20 +461,17 @@ export default function ReservationModal({
 
             {/* 閉じる */}
             <button
-              type="button"
-              onClick={onClose}
-              disabled={isSubmitting}
+              type="button" onClick={onClose} disabled={isSubmitting}
               className="px-4 py-2 rounded-lg text-sm font-medium transition-colors"
               style={{ color: 'var(--theme-text-secondary)' }}
             >
               閉じる
             </button>
 
-            {/* 保存（新規 or 編集時のみ） */}
+            {/* 保存 */}
             {!isReadOnly && (
               <button
-                type="submit"
-                disabled={isSubmitting}
+                type="submit" disabled={isSubmitting}
                 className="px-5 py-2 rounded-lg text-sm font-semibold text-white transition-all disabled:opacity-50"
                 style={{
                   background: 'linear-gradient(135deg, oklch(0.55 0.21 250), oklch(0.50 0.19 260))',

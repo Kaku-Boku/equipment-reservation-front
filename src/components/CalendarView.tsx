@@ -9,119 +9,103 @@
  * - 日付計算は Date コンストラクタに委譲して月の境界バグを排除
  * - 今日の日付は赤枠でハイライト
  * - 自分の予約があるドットは Primary カラーで表示
+ * - maxFutureDate を超えた日付はクリック不可・グレーアウト（管理者は除外）
  */
 import { useMemo } from 'preact/hooks';
 
-/** メンバー情報（予約の所有判定に使用） */
 interface Member {
   id: string;
   name: string;
   role?: string;
 }
 
-/** コンポーネント Props */
 interface Props {
   calendarDate: Date;
   onSelectDate: (dateStr: string) => void;
   reservations: any[];
   currentMember: Member;
+  /** 予約可能な最大日付（この日以降はクリック不可）。管理者は undefined = 制限なし */
+  maxFutureDate?: Date;
 }
 
-/** カレンダーの1マス分のデータ */
 interface CalendarDay {
-  /** 当月 or 前月/次月 */
   type: 'current' | 'other';
-  /** 日（1〜31） */
   day: number;
-  /** "YYYY-MM-DD" 形式の日付文字列 */
   dateStr: string;
-  /** その日の予約件数 */
   count: number;
-  /** 自分の予約が含まれるか */
   hasOwnReservation: boolean;
-  /** 曜日（0=日, 6=土） */
   dow: number;
+  /** 予約可能範囲外（maxFutureDate を超えている）か */
+  isOutOfRange: boolean;
 }
 
-export default function CalendarView({ calendarDate, onSelectDate, reservations, currentMember }: Props) {
+export default function CalendarView({
+  calendarDate,
+  onSelectDate,
+  reservations,
+  currentMember,
+  maxFutureDate,
+}: Props) {
   const year = calendarDate.getFullYear();
   const month = calendarDate.getMonth();
 
-  // 今日の日付文字列（ハイライト判定用）
   const todayStr = useMemo(() => {
     const t = new Date();
     return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`;
   }, []);
 
-  /** Date を "YYYY-MM-DD" に変換するヘルパー */
-  const toDateStr = (d: Date): string => {
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-  };
+  const toDateStr = (d: Date): string =>
+    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
-  // カレンダーのマス目を計算
+  // maxFutureDate を "YYYY-MM-DD" 文字列に変換（比較用）
+  const maxFutureDateStr = maxFutureDate ? toDateStr(maxFutureDate) : null;
+
   const days = useMemo((): CalendarDay[] => {
     const firstDay = new Date(year, month, 1);
     const lastDay = new Date(year, month + 1, 0);
-    const startDow = firstDay.getDay(); // 0=日曜
+    const startDow = firstDay.getDay();
     const totalDays = lastDay.getDate();
-
     const calendarDays: CalendarDay[] = [];
 
-    // 1. 前月のマスを埋める（Date コンストラクタに月跨ぎを委譲）
     for (let i = startDow - 1; i >= 0; i--) {
       const d = new Date(year, month, -i);
+      const dateStr = toDateStr(d);
       calendarDays.push({
-        type: 'other',
-        day: d.getDate(),
-        dateStr: toDateStr(d),
-        count: 0,
-        hasOwnReservation: false,
-        dow: d.getDay(),
+        type: 'other', day: d.getDate(), dateStr,
+        count: 0, hasOwnReservation: false, dow: d.getDay(),
+        isOutOfRange: maxFutureDateStr ? dateStr > maxFutureDateStr : false,
       });
     }
 
-    // 2. 当月のマスを計算
     for (let d = 1; d <= totalDays; d++) {
       const date = new Date(year, month, d);
       const dateStr = toDateStr(date);
-
-      // 予約データをフィルタリング
       const dayReservations = reservations.filter(r => r.start_time.startsWith(dateStr));
       const hasOwn = dayReservations.some(r => r.created_by_member?.id === currentMember?.id);
-
       calendarDays.push({
-        type: 'current',
-        day: d,
-        dateStr,
-        count: dayReservations.length,
-        hasOwnReservation: hasOwn,
-        dow: date.getDay(),
+        type: 'current', day: d, dateStr,
+        count: dayReservations.length, hasOwnReservation: hasOwn, dow: date.getDay(),
+        isOutOfRange: maxFutureDateStr ? dateStr > maxFutureDateStr : false,
       });
     }
 
-    // 3. 次月のマスを埋める（35 or 42 マスに調整）
     const totalCells = calendarDays.length;
     const targetCells = totalCells <= 35 ? 35 : 42;
-    const remaining = targetCells - totalCells;
-
-    for (let i = 1; i <= remaining; i++) {
+    for (let i = 1; i <= targetCells - totalCells; i++) {
       const d = new Date(year, month + 1, i);
+      const dateStr = toDateStr(d);
       calendarDays.push({
-        type: 'other',
-        day: d.getDate(),
-        dateStr: toDateStr(d),
-        count: 0,
-        hasOwnReservation: false,
-        dow: d.getDay(),
+        type: 'other', day: d.getDate(), dateStr,
+        count: 0, hasOwnReservation: false, dow: d.getDay(),
+        isOutOfRange: maxFutureDateStr ? dateStr > maxFutureDateStr : false,
       });
     }
 
     return calendarDays;
-  }, [year, month, reservations, currentMember]);
+  }, [year, month, reservations, currentMember, maxFutureDateStr]);
 
   return (
     <div className="animate-fade-in w-full max-w-5xl mx-auto">
-
       {/* 曜日ヘッダー */}
       <div className="grid grid-cols-7 gap-1 sm:gap-2 mb-2">
         {['日', '月', '火', '水', '木', '金', '土'].map((dayLabel, idx) => (
@@ -144,25 +128,32 @@ export default function CalendarView({ calendarDate, onSelectDate, reservations,
           const isOtherMonth = d.type === 'other';
           const isSunday = d.dow === 0;
           const isSaturday = d.dow === 6;
+          const isDisabled = d.isOutOfRange;
 
           return (
             <div
               key={d.dateStr}
-              className="flex flex-col items-center pt-2 pb-1 px-1 sm:pt-3 sm:px-2 rounded-xl transition-all duration-200 cursor-pointer min-h-[70px] sm:min-h-[90px] aspect-square relative"
+              className={`flex flex-col items-center pt-2 pb-1 px-1 sm:pt-3 sm:px-2 rounded-xl transition-all duration-200 min-h-[70px] sm:min-h-[90px] aspect-square relative ${
+                isDisabled ? 'cursor-not-allowed' : 'cursor-pointer'
+              }`}
               style={{
                 background: isToday
                   ? 'var(--theme-today-bg)'
-                  : isOtherMonth
-                    ? 'transparent'
-                    : 'var(--theme-card-bg)',
+                  : isDisabled
+                    ? 'var(--theme-input-bg)'
+                    : isOtherMonth
+                      ? 'transparent'
+                      : 'var(--theme-card-bg)',
                 border: isToday
                   ? '1.5px solid var(--theme-today-border)'
-                  : `1px solid ${isOtherMonth ? 'transparent' : 'var(--theme-card-border)'}`,
-                opacity: isOtherMonth ? 0.35 : 1,
+                  : `1px solid ${isOtherMonth || isDisabled ? 'transparent' : 'var(--theme-card-border)'}`,
+                opacity: isOtherMonth ? 0.35 : isDisabled ? 0.4 : 1,
               }}
-              onClick={() => onSelectDate(d.dateStr)}
+              onClick={() => {
+                if (!isDisabled) onSelectDate(d.dateStr);
+              }}
               onMouseEnter={(e) => {
-                if (!isOtherMonth) {
+                if (!isOtherMonth && !isDisabled) {
                   (e.currentTarget as HTMLElement).style.transform = 'translateY(-2px)';
                   (e.currentTarget as HTMLElement).style.boxShadow = 'var(--shadow-md)';
                 }
@@ -172,7 +163,16 @@ export default function CalendarView({ calendarDate, onSelectDate, reservations,
                 (e.currentTarget as HTMLElement).style.boxShadow = '';
               }}
             >
-              {/* 日付テキスト */}
+              {/* 予約不可バッジ（範囲外） */}
+              {isDisabled && !isOtherMonth && (
+                <div
+                  className="absolute top-1 right-1 text-[0.5rem] font-medium px-1 rounded"
+                  style={{ background: 'var(--theme-card-border)', color: 'var(--theme-text-secondary)' }}
+                >
+                  予約不可
+                </div>
+              )}
+
               <span
                 className={`text-sm sm:text-base mb-1 ${
                   isToday ? 'font-bold text-danger-500' :
@@ -182,15 +182,14 @@ export default function CalendarView({ calendarDate, onSelectDate, reservations,
                 }`}
                 style={
                   !isToday && !isSunday && !isSaturday
-                    ? { color: 'var(--theme-text)' }
+                    ? { color: isDisabled ? 'var(--theme-text-secondary)' : 'var(--theme-text)' }
                     : undefined
                 }
               >
                 {d.day}
               </span>
 
-              {/* 予約ドット */}
-              {d.count > 0 && (
+              {d.count > 0 && !isDisabled && (
                 <div className="absolute bottom-2 left-0 right-0 flex flex-wrap justify-center gap-1 px-1">
                   {Array.from({ length: Math.min(d.count, 4) }).map((_, idx) => (
                     <div

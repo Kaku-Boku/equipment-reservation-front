@@ -10,6 +10,8 @@
  */
 import type { APIRoute } from 'astro';
 import { createSupabaseServerClient } from '../../lib/supabase';
+// @ts-ignore
+import { env } from 'cloudflare:workers';
 
 /** JSON レスポンスの共通ヘッダー */
 const JSON_HEADERS = { 'Content-Type': 'application/json' } as const;
@@ -36,9 +38,7 @@ export const POST: APIRoute = async ({ request, cookies, locals }) => {
       );
     }
 
-    // @ts-ignore (型定義がない場合の暫定対応)
-    const runtimeEnv = locals.runtime?.env || {};
-    const supabase = createSupabaseServerClient(cookies, request.headers, runtimeEnv);
+    const supabase = createSupabaseServerClient(cookies, request.headers, env);
 
     // members テーブルで active なメンバーかチェック
     const { data: member, error } = await supabase

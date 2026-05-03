@@ -4,6 +4,7 @@
  * 機能:
  * - SSR で取得した初期データを起点にクライアント側でキャッシュ
  * - カレンダーナビゲーション時に範囲外のデータを追加取得
+ *   ※ maxFutureDate を超える未来のデータは取得しない（帯域最適化）
  * - Supabase Realtime で INSERT/UPDATE/DELETE を差分同期
  *
  * 設計ポイント:
@@ -29,7 +30,8 @@ interface Reservation {
   memo: string | null;
   notice: string | null;
   event_id: string | null;
-  facilities: { id: string; name: string } | null;
+  status: 'pending' | 'approved' | 'rejected';
+  facilities: { id: string; name: string; status?: string } | null;
   created_by_member: { id: string; name: string } | null;
   reservation_participants?: { members: { id: string; name: string } }[];
 }
@@ -37,16 +39,18 @@ interface Reservation {
 /**
  * 予約データの管理フック
  *
- * @param initialData  - SSR でプリフェッチした予約配列
- * @param initialRange - SSR でフェッチした日付範囲
- * @param supabaseUrl  - Supabase プロジェクトURL
- * @param supabaseKey  - Supabase 匿名キー
+ * @param initialData    - SSR でプリフェッチした予約配列
+ * @param initialRange   - SSR でフェッチした日付範囲
+ * @param supabaseUrl    - Supabase プロジェクトURL
+ * @param supabaseKey    - Supabase 匿名キー
+ * @param maxFutureDate  - フェッチの未来方向の上限日（管理者は undefined = 制限なし）
  */
 export function useReservations(
   initialData: Reservation[],
   initialRange: DateRange,
   supabaseUrl: string,
-  supabaseKey: string
+  supabaseKey: string,
+  maxFutureDate?: Date
 ) {
   const [reservations, setReservations] = useState<Reservation[]>(initialData);
   const [loadedRange, setLoadedRange] = useState<DateRange>(initialRange);
@@ -60,7 +64,7 @@ export function useReservations(
 
   /** JOIN 付きの SELECT クエリ文字列（統一して使う） */
   const SELECT_WITH_JOINS =
-    '*, facilities:facility_id (id, name), created_by_member:created_by (id, name)';
+    '*, facilities:facility_id (id, name, status), created_by_member:created_by (id, name)';
 
   // ── 追加データのフェッチ ──
   const fetchMoreIfNeeded = useCallback(async (targetDate: Date) => {
@@ -75,7 +79,19 @@ export function useReservations(
 
     // ターゲット月の前後 1 ヶ月分を追加取得
     const fetchStart = new Date(targetDate.getFullYear(), targetDate.getMonth() - 1, 1).toISOString();
-    const fetchEnd   = new Date(targetDate.getFullYear(), targetDate.getMonth() + 2, 0).toISOString();
+    let fetchEndDate = new Date(targetDate.getFullYear(), targetDate.getMonth() + 2, 0);
+
+    // maxFutureDate が設定されている場合、未来方向の取得を上限でキャップ
+    if (maxFutureDate && fetchEndDate > maxFutureDate) {
+      fetchEndDate = maxFutureDate;
+    }
+    const fetchEnd = fetchEndDate.toISOString();
+
+    // フェッチ開始日が終了日を超えていたら何もしない
+    if (new Date(fetchStart) > fetchEndDate) {
+      setIsFetchingMore(false);
+      return;
+    }
 
     const { data, error } = await supabase
       .from('reservations')
@@ -103,7 +119,7 @@ export function useReservations(
     }
 
     setIsFetchingMore(false);
-  }, [loadedRange, supabase]);
+  }, [loadedRange, supabase, maxFutureDate]);
 
   // ── Realtime サブスクリプション（差分同期） ──
   useEffect(() => {
@@ -117,7 +133,6 @@ export function useReservations(
 
           switch (eventType) {
             case 'DELETE': {
-              // ローカル配列から該当レコードを除去
               const deletedId = (oldRecord as any)?.id;
               if (deletedId) {
                 setReservations(prev => prev.filter(r => r.id !== deletedId));
@@ -127,8 +142,6 @@ export function useReservations(
 
             case 'INSERT':
             case 'UPDATE': {
-              // Realtime ペイロードには JOIN データが無いため、
-              // 個別に完全なレコードを取得する
               const recordId = (newRecord as any)?.id;
               if (!recordId) break;
 
