@@ -13,8 +13,8 @@ export default function SettingsTab({ initialSettings }: { initialSettings: AppS
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(settings),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
+      const data = await res.json() as { error?: string };
+      if (!res.ok) throw new Error(data.error || '保存に失敗しました');
       setMsg({ type: 'ok', text: '設定を保存しました。' });
     } catch (e: any) {
       setMsg({ type: 'err', text: e.message || '保存に失敗しました。' });
@@ -65,9 +65,9 @@ export default function SettingsTab({ initialSettings }: { initialSettings: AppS
             setMsg(null);
             try {
               const res = await fetch('/api/admin/link-shared-calendar', { method: 'POST' });
-              const data = await res.json();
-              if (!res.ok) throw new Error(data.error);
-              setSettings(s => ({ ...s, shared_calendar_email: data.email }));
+              const data = await res.json() as { email?: string; error?: string };
+              if (!res.ok) throw new Error(data.error || '連携に失敗しました');
+              setSettings(s => ({ ...s, shared_calendar_email: data.email || null }));
               setMsg({ type: 'ok', text: 'カレンダーを連携しました。' });
             } catch (e: any) {
               setMsg({ type: 'err', text: e.message || '連携に失敗しました。' });

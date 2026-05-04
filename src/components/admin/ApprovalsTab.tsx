@@ -44,7 +44,11 @@ export default function ApprovalsTab({ initialReservations, supabaseUrl, supabas
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id, status }),
       });
-      if (!res.ok) { const d = await res.json(); alert(d.error); return; }
+      if (!res.ok) { 
+        const d = await res.json() as { error?: string }; 
+        alert(d.error || 'エラーが発生しました'); 
+        return; 
+      }
       setReservations(prev => prev.filter(r => r.id !== id));
     } finally { setBusy(''); }
   };

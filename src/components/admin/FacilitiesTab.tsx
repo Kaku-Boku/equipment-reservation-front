@@ -21,8 +21,8 @@ export default function FacilitiesTab({ initialFacilities }: { initialFacilities
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: newName, description: newDesc }),
       });
-      const data = await res.json();
-      if (!res.ok) { alert(data.error); return; }
+      const data = await res.json() as { facility: FacilityFull; error?: string };
+      if (!res.ok) { alert(data.error || 'エラーが発生しました'); return; }
       setFacilities(prev => [...prev, { ...data.facility, description: newDesc || null }]);
       setNewName(''); setNewDesc('');
     } finally { setBusy(false); }
@@ -35,7 +35,11 @@ export default function FacilitiesTab({ initialFacilities }: { initialFacilities
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id: f.id, name: f.name, description: f.description, status: f.status }),
       });
-      if (!res.ok) { const d = await res.json(); alert(d.error); return; }
+      if (!res.ok) { 
+        const d = await res.json() as { error?: string }; 
+        alert(d.error || 'エラーが発生しました'); 
+        return; 
+      }
       setFacilities(prev => prev.map(x => x.id === f.id ? f : x));
       setEditing(null);
     } finally { setBusy(false); }

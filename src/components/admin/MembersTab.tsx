@@ -22,8 +22,8 @@ export default function MembersTab({ initialMembers, currentMemberId }: { initia
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: newName, email: newEmail, role: newRole }),
       });
-      const data = await res.json();
-      if (!res.ok) { alert(data.error); return; }
+      const data = await res.json() as { member: MemberFull; error?: string };
+      if (!res.ok) { alert(data.error || 'エラーが発生しました'); return; }
       setMembers(prev => [data.member, ...prev]);
       setNewName('');
       setNewEmail('');
@@ -38,7 +38,11 @@ export default function MembersTab({ initialMembers, currentMemberId }: { initia
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id, role }),
       });
-      if (!res.ok) { const d = await res.json(); alert(d.error); return; }
+      if (!res.ok) { 
+        const d = await res.json() as { error?: string }; 
+        alert(d.error || 'エラーが発生しました'); 
+        return; 
+      }
       setMembers(prev => prev.map(m => m.id === id ? { ...m, role } : m));
     } finally { setBusy(''); }
   };
@@ -53,7 +57,11 @@ export default function MembersTab({ initialMembers, currentMemberId }: { initia
         method: 'DELETE', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id, restore: newStatus === 'active' }),
       });
-      if (!res.ok) { const d = await res.json(); alert(d.error); return; }
+      if (!res.ok) { 
+        const d = await res.json() as { error?: string }; 
+        alert(d.error || 'エラーが発生しました'); 
+        return; 
+      }
       setMembers(prev => prev.map(m => m.id === id ? { ...m, status: newStatus } : m));
     } finally { setBusy(''); }
   };
