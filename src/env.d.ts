@@ -25,18 +25,20 @@ interface ImportMeta {
   readonly env: ImportMetaEnv;
 }
 
-declare namespace App {
-  interface Locals {
-    /** SSR用Supabaseクライアント（Cookieからセッション復元済み） */
-    supabase: SupabaseClient;
-    /** 現在のセッション情報 */
-    session: Session | null;
-    /** 現在ログイン中のメンバー情報 */
-    member: {
-      id: string;
-      email: string;
-      name: string;
-      role: 'admin' | 'user';
-    } | null;
+declare global {
+  namespace App {
+    interface Locals {
+      /** SSR用Supabaseクライアント（Cookieからセッション復元済み） */
+      supabase: SupabaseClient;
+      /** 現在のセッション情報 */
+      session: Session | null;
+      /** 現在ログイン中のメンバー情報 */
+      member: {
+        id: string;
+        email: string;
+        name: string;
+        role: 'admin' | 'user';
+      } | null;
+    }
   }
 }

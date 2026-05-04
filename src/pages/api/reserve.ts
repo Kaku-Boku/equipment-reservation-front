@@ -48,7 +48,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
       return new Response(JSON.stringify({ error: '認証が必要です。' }), { status: 401, headers: JSON_HEADERS });
     }
 
-    const body = await request.json();
+    const body = await request.json() as any;
     const { facility_id, start_time, end_time, purpose, memo, notice, participant_ids } = body;
 
     if (!facility_id || !start_time || !end_time || !purpose?.trim()) {
@@ -76,7 +76,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
     }
 
     // 予約可能日数チェック（管理者は除外）
-    if (member.role !== 'admin' && settings.reservation_lead_time_days > 0) {
+    if (member!.role !== 'admin' && settings.reservation_lead_time_days > 0) {
       const maxDate = new Date();
       maxDate.setDate(maxDate.getDate() + settings.reservation_lead_time_days);
       if (new Date(start_time) > maxDate) {
@@ -94,7 +94,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
       .from('reservations')
       .insert({
         facility_id,
-        created_by: member.id,
+        created_by: member!.id,
         start_time,
         end_time,
         purpose: purpose.trim(),
@@ -172,7 +172,7 @@ export const PUT: APIRoute = async ({ request, locals }) => {
       return new Response(JSON.stringify({ error: '認証が必要です。' }), { status: 401, headers: JSON_HEADERS });
     }
 
-    const body = await request.json();
+    const body = await request.json() as any;
     const { id, facility_id, start_time, end_time, purpose, memo, notice, participant_ids } = body;
 
     if (!id) return new Response(JSON.stringify({ error: '予約IDが必要です。' }), { status: 400, headers: JSON_HEADERS });
@@ -194,7 +194,7 @@ export const PUT: APIRoute = async ({ request, locals }) => {
       .single();
 
     if (!existing) return new Response(JSON.stringify({ error: '予約が見つかりません。' }), { status: 404, headers: JSON_HEADERS });
-    if (existing.created_by !== member.id && member.role !== 'admin') {
+    if (existing.created_by !== member!.id && member!.role !== 'admin') {
       return new Response(JSON.stringify({ error: 'この予約を編集する権限がありません。' }), { status: 403, headers: JSON_HEADERS });
     }
 
@@ -231,7 +231,7 @@ export const PUT: APIRoute = async ({ request, locals }) => {
       facilityName: facility?.name || '',
       startTime: start_time, endTime: end_time,
       purpose: purpose.trim(), memo: memo?.trim() || null, notice: notice?.trim() || null,
-      participantEmails, creatorEmail: member.email,
+      participantEmails, creatorEmail: member!.email,
     };
 
     const syncResult = await syncWithGoogleCalendar('update', syncData, supabase, existing.created_by, env);
@@ -259,7 +259,7 @@ export const DELETE: APIRoute = async ({ request, locals }) => {
       return new Response(JSON.stringify({ error: '認証が必要です。' }), { status: 401, headers: JSON_HEADERS });
     }
 
-    const body = await request.json();
+    const body = await request.json() as any;
     const { id } = body;
     if (!id) return new Response(JSON.stringify({ error: '予約IDが必要です。' }), { status: 400, headers: JSON_HEADERS });
 
@@ -270,7 +270,7 @@ export const DELETE: APIRoute = async ({ request, locals }) => {
       .single();
 
     if (!existing) return new Response(JSON.stringify({ error: '予約が見つかりません。' }), { status: 404, headers: JSON_HEADERS });
-    if (existing.created_by !== member.id && member.role !== 'admin') {
+    if (existing.created_by !== member!.id && member!.role !== 'admin') {
       return new Response(JSON.stringify({ error: 'この予約を削除する権限がありません。' }), { status: 403, headers: JSON_HEADERS });
     }
 

@@ -28,7 +28,7 @@ export const PUT: APIRoute = async ({ request, locals }) => {
       return errorResponse('管理者のみ実行できます。', 403);
     }
 
-    const body = await request.json();
+    const body = await request.json() as any;
     const { id, status } = body;
 
     if (!id) {
@@ -69,7 +69,7 @@ export const PUT: APIRoute = async ({ request, locals }) => {
     }
 
     const actionText = status === 'approved' ? '承認' : '却下';
-    logger.info(`[api/approve PUT] 予約 ${id} を ${actionText} しました（by ${member.email}）`);
+    logger.info(`[api/approve PUT] 予約 ${id} を ${actionText} しました（by ${member!.email}）`);
 
     // ── 承認時: Google カレンダーへの同期 ──
     // Why: auto_approve=false の場合、予約は pending で作成される。
@@ -96,7 +96,7 @@ export const PUT: APIRoute = async ({ request, locals }) => {
         // 個人カレンダー同期
         const personalSync = await syncWithGoogleCalendar('create', syncData, supabase, existing.created_by, env);
         if (!personalSync.synced) {
-          logger.warn('[api/approve PUT] 個人カレンダー同期スキップ:', personalSync.reason);
+          logger.warn('[api/approve PUT] 個人カレンダー同期スキップ:', personalSync.error);
         }
 
         // 共有カレンダー同期

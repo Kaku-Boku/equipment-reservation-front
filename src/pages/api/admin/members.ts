@@ -42,7 +42,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
   const { supabase } = locals;
 
   try {
-    const body = await request.json();
+    const body = await request.json() as any;
     const { email, name, role } = body;
 
     if (!email || !name) {
@@ -82,7 +82,7 @@ export const PUT: APIRoute = async ({ request, locals }) => {
   const { supabase, member } = locals;
 
   try {
-    const body = await request.json();
+    const body = await request.json() as any;
     const { id, role } = body;
 
     if (!id) return new Response(JSON.stringify({ error: 'メンバーIDが必要です。' }), { status: 400, headers: JSON_HEADERS });
@@ -116,7 +116,7 @@ export const DELETE: APIRoute = async ({ request, locals }) => {
   const { supabase, member } = locals;
 
   try {
-    const body = await request.json();
+    const body = await request.json() as any;
     const { id, restore } = body;
 
     if (!id) return new Response(JSON.stringify({ error: 'メンバーIDが必要です。' }), { status: 400, headers: JSON_HEADERS });

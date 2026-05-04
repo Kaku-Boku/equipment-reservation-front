@@ -19,7 +19,7 @@ const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export const POST: APIRoute = async ({ request, cookies, locals }) => {
   try {
-    const body = await request.json();
+    const body = await request.json() as any;
     const email = body?.email?.trim()?.toLowerCase();
 
     if (!email) {

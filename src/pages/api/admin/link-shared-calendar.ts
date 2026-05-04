@@ -23,7 +23,7 @@ export const POST: APIRoute = async ({ locals }) => {
     const { data: tokenData, error: tokenError } = await supabase
       .from('user_tokens')
       .select('refresh_token')
-      .eq('member_id', member.id)
+      .eq('member_id', member!.id)
       .single();
 
     if (tokenError || !tokenData || !tokenData.refresh_token) {
@@ -55,7 +55,7 @@ export const POST: APIRoute = async ({ locals }) => {
     const { error: settingsError } = await supabase
       .from('app_settings')
       .update({
-        shared_calendar_email: member.email,
+        shared_calendar_email: member!.email,
         shared_calendar_enabled: true,
         updated_at: new Date().toISOString(),
       })
@@ -67,7 +67,7 @@ export const POST: APIRoute = async ({ locals }) => {
     }
 
 
-    return new Response(JSON.stringify({ ok: true, email: member.email }), { status: 200, headers: JSON_HEADERS });
+    return new Response(JSON.stringify({ ok: true, email: member!.email }), { status: 200, headers: JSON_HEADERS });
   } catch (err) {
     logger.error('[api/admin/link-shared-calendar] unexpected error:', err);
     return errorResponse('サーバーエラーが発生しました。');

@@ -46,8 +46,10 @@ export function createSupabaseServerClient(
     {
       cookies: {
         getAll() {
-          // リクエストヘッダーの Cookie 文字列を { name, value }[] にパース
-          return parseCookieHeader(headers.get('Cookie') ?? '');
+          return parseCookieHeader(headers.get('Cookie') ?? '').map((c) => ({
+            name: c.name,
+            value: c.value ?? '',
+          }));
         },
         setAll(cookiesToSet) {
           // セッション更新時: 各 Cookie を Astro の cookies.set() でレスポンスに付与

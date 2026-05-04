@@ -21,6 +21,10 @@ const isAdmin = member?.role === 'admin';
 
 console.log('[index.astro] Page started. Member:', member?.name, 'isAdmin:', isAdmin);
 
+if (!member) {
+  return Astro.redirect('/login');
+}
+
 if (!supabase) {
   console.error('[index.astro] Supabase client is missing in Astro.locals!');
 }
@@ -88,7 +92,7 @@ const { data: facilities } = await supabase
 // メンバー一覧（参加者選択用）
 const { data: members } = await supabase
   .from("members")
-  .select("id, name, email")
+  .select("id, name, email, role")
   .eq("status", "active")
   .order("name");
 ---

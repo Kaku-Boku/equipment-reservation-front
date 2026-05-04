@@ -36,7 +36,7 @@ export const PUT: APIRoute = async ({ request, locals }) => {
   const { supabase, member } = locals;
 
   try {
-    const body = await request.json();
+    const body = await request.json() as any;
     const {
       start_hour, end_hour,
       reservation_lead_time_days,

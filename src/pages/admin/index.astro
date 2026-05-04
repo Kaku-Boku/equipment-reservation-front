@@ -11,6 +11,10 @@ import AdminDashboard from "../../components/AdminDashboard";
 
 const { supabase, member, session } = Astro.locals;
 
+if (!member) {
+  return Astro.redirect('/login');
+}
+
 // ── 初期データ一括取得 ──
 const [
   { data: settings },
