@@ -1,7 +1,7 @@
 /**
  * 共通型定義
  *
- * app_settings / Member / Facility など複数のコンポーネント・APIルートで
+ * app_settings / Member / Facility / Reservation など複数のコンポーネント・APIルートで
  * 共有する型をここに集約する。
  */
 
@@ -48,4 +48,32 @@ export interface Facility {
   id: string;
   name: string;
   status: 'active' | 'maintenance' | 'retired';
+}
+
+/**
+ * 予約データ（JOIN 済みの完全な形）
+ *
+ * Why: 各コンポーネントで `any[]` を使っていたため、
+ *      プロパティの typo や構造変更に気づけなかった。
+ *      型定義を一元化して型安全性を確保する。
+ */
+export interface Reservation {
+  id: string;
+  facility_id?: string;
+  created_by?: string;
+  start_time: string;
+  end_time: string;
+  purpose: string;
+  memo: string | null;
+  notice: string | null;
+  event_id: string | null;
+  shared_event_id?: string | null;
+  status: 'pending' | 'approved' | 'rejected';
+  created_at?: string;
+  /** JOIN: 設備情報 */
+  facilities: { id: string; name: string; status?: string } | null;
+  /** JOIN: 予約作成者情報 */
+  created_by_member: { id: string; name: string; email?: string } | null;
+  /** JOIN: 参加者リスト */
+  reservation_participants?: { members: { id: string; name: string } }[];
 }

@@ -10,11 +10,9 @@
  */
 import type { APIRoute } from 'astro';
 import { createSupabaseServerClient } from '../../lib/supabase';
-// @ts-ignore
-import { env } from 'cloudflare:workers';
+import { JSON_HEADERS } from '../../lib/api-utils';
+import { logger } from '../../lib/logger';
 
-/** JSON レスポンスの共通ヘッダー */
-const JSON_HEADERS = { 'Content-Type': 'application/json' } as const;
 
 /** メールアドレスの基本バリデーション正規表現 */
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -38,7 +36,8 @@ export const POST: APIRoute = async ({ request, cookies, locals }) => {
       );
     }
 
-    const supabase = createSupabaseServerClient(cookies, request.headers, env);
+    const supabase = createSupabaseServerClient(cookies, request.headers);
+
 
     // members テーブルで active なメンバーかチェック
     const { data: member, error } = await supabase
@@ -63,7 +62,8 @@ export const POST: APIRoute = async ({ request, cookies, locals }) => {
       { status: 200, headers: JSON_HEADERS }
     );
   } catch (err) {
-    console.error('[api/pre-check] エラー:', err);
+    logger.error('[api/pre-check] エラー:', err);
+
     return new Response(
       JSON.stringify({ ok: false, message: 'サーバーエラーが発生しました。' }),
       { status: 500, headers: JSON_HEADERS }

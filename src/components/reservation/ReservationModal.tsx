@@ -1,23 +1,18 @@
 /**
  * 予約モーダルコンポーネント
  *
- * 3つのモードを持つ:
+ * モード (mode):
  * - create: 新規予約作成
- * - edit:   既存予約の編集（作成者 or admin）
- * - view:   閲覧専用（他ユーザーの予約）
+ * - edit:   既存予約の編集（作成者 or 管理者のみ）
+ * - view:   閲覧専用（他ユーザーの予約、またはロックされた過去の予約）
  *
- * バリデーション:
- * - min_reservation_minutes の倍数チェック
- * - max_reservation_hours 上限チェック
- *
- * 過去データロックUI（管理者は免除）:
- * - now > start_time + 1h: 開始時刻変更・削除ボタン disabled
- * - now > end_time + 1h:   全フィールド read-only
- *
- * 管理者向け承認/却下ボタン（status === 'pending' の編集モード時）
+ * 制約・バリデーション:
+ * - min_reservation_minutes / max_reservation_hours による予約時間の検証
+ * - 過去データロック（now > start_time + 1h: 開始時刻変更・削除不可, now > end_time + 1h: 編集不可）
  */
-import { useState, useEffect } from 'preact/hooks';
-import type { AppSettings, Member, Facility } from '../lib/types';
+import { useState, useEffect, useMemo } from 'preact/hooks';
+import { validateReservationDuration, getReservationColor } from '../../utils/reservation-utils';
+import type { AppSettings, Member, Facility } from '../../lib/types';
 
 interface MemberOption extends Member {
   email: string;
@@ -31,6 +26,7 @@ interface ModalProps {
   members: MemberOption[];
   currentMember: Member;
   appSettings: AppSettings;
+  allReservations?: any[];
   onClose: () => void;
   onSave: (data: any) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
@@ -58,6 +54,7 @@ export default function ReservationModal({
   members,
   currentMember,
   appSettings,
+  allReservations,
   onClose,
   onSave,
   onDelete,
@@ -70,6 +67,8 @@ export default function ReservationModal({
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
+  const [participantSearch, setParticipantSearch] = useState('');
+  const [showParticipantDropdown, setShowParticipantDropdown] = useState(false);
 
   const isAdmin = currentMember?.role === 'admin';
 
@@ -90,10 +89,9 @@ export default function ReservationModal({
     }
   }, [isOpen, initialData, facilities]);
 
-  if (!isOpen) return null;
-
   // ── 時間ロック判定（管理者は常にフル操作可） ──
-  const now = new Date();
+  const now = useMemo(() => new Date(), [isOpen]);
+
   let startTimeLocked = false; // 開始時刻変更・削除が disabled
   let fullyLocked = false;     // 全フィールド read-only
 
@@ -113,7 +111,65 @@ export default function ReservationModal({
   const disableDelete = isReadOnly || (startTimeLocked && !isAdmin);
   const isPending = initialData?.status === 'pending';
 
-  /** 入力バリデーション */
+  // ── 設備状態の判定 ──
+  const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  const currentTime = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+
+  const currentStatus = useMemo(() => {
+    if (!formData.facility_id) return null;
+    const facility = facilities.find(f => f.id === formData.facility_id);
+    if (facility?.status === 'maintenance') return { text: 'メンテナンス中', color: 'var(--color-danger-500)', bg: 'oklch(0.62 0.22 25 / 0.1)' };
+    
+    if (!allReservations) return null;
+
+    const todayRes = allReservations.filter(r => 
+       (r.facility_id === formData.facility_id || r.facilities?.id === formData.facility_id) &&
+       r.start_time.startsWith(todayStr) &&
+       r.status !== 'rejected'
+    ).sort((a, b) => a.start_time.localeCompare(b.start_time));
+
+    if (todayRes.length === 0) return { text: '本日の予約なし', color: 'var(--color-success-500)', bg: 'oklch(0.55 0.21 150 / 0.1)' };
+
+    const extractTime = (iso: string) => iso.includes('T') ? iso.split('T')[1].substring(0, 5) : iso.substring(11, 16);
+
+    const inUse = todayRes.find(r => {
+      const s = extractTime(r.start_time);
+      const e = extractTime(r.end_time);
+      return s <= currentTime && currentTime < e;
+    });
+
+    if (inUse) return { text: '使用中', color: 'var(--color-danger-500)', bg: 'oklch(0.62 0.22 25 / 0.1)' };
+
+    const nextRes = todayRes.find(r => currentTime < extractTime(r.start_time));
+
+    if (nextRes) {
+      const s = extractTime(nextRes.start_time);
+      const diffMin = (parseInt(s.split(':')[0]) * 60 + parseInt(s.split(':')[1])) - (now.getHours() * 60 + now.getMinutes());
+      if (diffMin <= 15) return { text: `${diffMin}分後から使用開始`, color: 'var(--color-danger-500)', bg: 'oklch(0.62 0.22 25 / 0.1)' };
+      if (diffMin <= 60) return { text: `${diffMin}分後から使用開始`, color: 'oklch(0.55 0.18 60)', bg: 'oklch(0.65 0.18 60 / 0.15)' }; // warning
+      return { text: `約${Math.floor(diffMin/60)}時間後から使用開始`, color: 'var(--color-primary-500)', bg: 'oklch(0.55 0.21 250 / 0.1)' };
+    }
+
+    return { text: '空き', color: 'oklch(0.45 0.18 145)', bg: 'oklch(0.55 0.18 145 / 0.1)' }; // success
+  }, [formData.facility_id, allReservations]);
+
+  // 外側クリックで参加者ドロップダウンを閉じる
+  useEffect(() => {
+    if (!showParticipantDropdown) return;
+    const handler = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (!target.closest('.participant-dropdown-container')) {
+        setShowParticipantDropdown(false);
+      }
+    };
+    document.addEventListener('click', handler);
+    return () => document.removeEventListener('click', handler);
+  }, [showParticipantDropdown]);
+
+  // ── フォーム送信 ──
+
+
+  /** フォーム入力値のバリデーション */
   const validate = (): string | null => {
     if (!formData.purpose.trim()) return '目的・用途を入力してください。';
     if (!formData.facility_id) return '設備を選択してください。';
@@ -122,27 +178,15 @@ export default function ReservationModal({
     if (!formData.end_time) return '終了時間を入力してください。';
     if (formData.start_time >= formData.end_time) return '終了時間は開始時間より後に設定してください。';
 
-    // 予約時間の計算
     const [sh, sm] = formData.start_time.split(':').map(Number);
     const [eh, em] = formData.end_time.split(':').map(Number);
     const durationMin = (eh * 60 + em) - (sh * 60 + sm);
 
-    // min_reservation_minutes の倍数チェック
-    const minUnit = appSettings.min_reservation_minutes;
-    if (durationMin < minUnit) {
-      return `予約時間は最低 ${minUnit} 分以上必要です。`;
-    }
-    if (durationMin % minUnit !== 0) {
-      return `予約時間は ${minUnit} 分単位で設定してください（例: ${minUnit}, ${minUnit * 2}, ${minUnit * 3}分...）。`;
-    }
-
-    // max_reservation_hours 上限チェック
-    const maxMin = appSettings.max_reservation_hours * 60;
-    if (durationMin > maxMin) {
-      return `1回あたりの予約は最大 ${appSettings.max_reservation_hours} 時間までです。`;
-    }
-
-    return null;
+    return validateReservationDuration(
+      durationMin,
+      appSettings.min_reservation_minutes,
+      appSettings.max_reservation_hours
+    );
   };
 
   const handleSubmit = async (e: Event) => {
@@ -215,7 +259,49 @@ export default function ReservationModal({
     setFormData(prev => ({ ...prev, [field]: value }));
   };
 
+  const handleTimeBlur = (field: 'start_time' | 'end_time') => {
+    let val = formData[field];
+    if (/^\d{3,4}$/.test(val)) {
+      const hStr = val.length === 3 ? val.slice(0, 1) : val.slice(0, 2);
+      const mStr = val.slice(-2);
+      let h = parseInt(hStr, 10);
+      let m = parseInt(mStr, 10);
+      if (h >= 0 && h < 24 && m >= 0 && m < 60) {
+        val = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+      } else {
+        val = ''; // 無効な値の場合はクリア
+      }
+    }
+
+    
+    if (/^\d{1,2}:\d{2}$/.test(val)) {
+      const parts = val.split(':');
+      let h = parseInt(parts[0], 10);
+      let m = parseInt(parts[1], 10);
+      const minUnit = appSettings.min_reservation_minutes || 15;
+      if (m % minUnit !== 0) {
+        m = Math.ceil(m / minUnit) * minUnit;
+        if (m >= 60) {
+          m -= 60;
+          h = (h + 1) % 24;
+        }
+      }
+      val = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+    }
+
+    if (val !== formData[field]) {
+      updateField(field, val);
+    }
+  };
+
+  const filteredMembers = members.filter(m => 
+    m.name.toLowerCase().includes(participantSearch.toLowerCase()) || 
+    m.email.toLowerCase().includes(participantSearch.toLowerCase())
+  );
+
   const titleText = mode === 'create' ? '新規予約' : mode === 'edit' ? '予約の編集' : '予約の詳細';
+
+  if (!isOpen) return null;
 
   return (
     <div
@@ -284,6 +370,20 @@ export default function ReservationModal({
         {/* ── フォーム ── */}
         <form onSubmit={handleSubmit} className="space-y-4">
 
+
+          {/* 設備状態 */}
+          {currentStatus && formData.date === todayStr && (
+            <div className="flex items-center gap-2 mb-2">
+              <span className="text-xs font-semibold" style={{ color: 'var(--theme-text-secondary)' }}>現在の設備状態:</span>
+              <span
+                className="text-xs font-bold px-2 py-0.5 rounded-full"
+                style={{ background: currentStatus.bg, color: currentStatus.color }}
+              >
+                {currentStatus.text}
+              </span>
+            </div>
+          )}
+
           {/* 目的・用途 */}
           <div>
             <label className="form-label form-label-required">目的・用途</label>
@@ -326,20 +426,24 @@ export default function ReservationModal({
             <div>
               <label className="form-label form-label-required">開始時間</label>
               <input
-                type="time" required disabled={disableStartTime}
+                type="text" required disabled={disableStartTime}
                 value={formData.start_time}
                 onInput={(e) => updateField('start_time', (e.target as HTMLInputElement).value)}
+                onBlur={() => handleTimeBlur('start_time')}
                 className="form-input"
+                placeholder="09:00 または 0900"
                 style={disableStartTime && !isReadOnly ? { opacity: 0.5 } : undefined}
               />
             </div>
             <div>
               <label className="form-label form-label-required">終了時間</label>
               <input
-                type="time" required disabled={isReadOnly}
+                type="text" required disabled={isReadOnly}
                 value={formData.end_time}
                 onInput={(e) => updateField('end_time', (e.target as HTMLInputElement).value)}
+                onBlur={() => handleTimeBlur('end_time')}
                 className="form-input"
+                placeholder="10:00 または 1000"
               />
             </div>
           </div>
@@ -384,37 +488,57 @@ export default function ReservationModal({
           {/* 参加者 */}
           <div>
             <label className="form-label">参加者</label>
-            <div
-              className="rounded-lg p-3 max-h-[140px] overflow-y-auto"
-              style={{ background: 'var(--theme-input-bg)', border: '1px solid var(--theme-input-border)' }}
-            >
-              {members.length === 0 ? (
-                <p className="text-xs" style={{ color: 'var(--theme-text-secondary)' }}>
-                  メンバーが登録されていません
-                </p>
-              ) : (
-                <div className="space-y-1">
-                  {members.map((m) => {
-                    const isSelected = formData.participant_ids.includes(m.id);
-                    return (
-                      <label
-                        key={m.id}
-                        className="flex items-center gap-2 px-2 py-1.5 rounded-md cursor-pointer transition-colors"
-                        style={{
-                          background: isSelected ? 'oklch(0.55 0.21 250 / 0.08)' : 'transparent',
-                          opacity: isReadOnly ? 0.6 : 1,
-                        }}
-                      >
-                        <input
-                          type="checkbox" disabled={isReadOnly} checked={isSelected}
-                          onChange={() => toggleParticipant(m.id)}
-                          className="rounded text-primary-500 focus:ring-primary-500"
-                        />
-                        <span className="text-sm" style={{ color: 'var(--theme-text)' }}>{m.name}</span>
-                        <span className="text-xs ml-auto" style={{ color: 'var(--theme-text-secondary)' }}>{m.email}</span>
-                      </label>
-                    );
-                  })}
+            <div className="relative participant-dropdown-container">
+
+              <div
+                className="form-input flex items-center justify-between cursor-pointer"
+                onClick={() => !isReadOnly && setShowParticipantDropdown(!showParticipantDropdown)}
+                style={{ opacity: isReadOnly ? 0.6 : 1 }}
+              >
+                <span>{formData.participant_ids.length}名選択中</span>
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" style={{ color: 'var(--theme-text-secondary)' }}>
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path>
+                </svg>
+              </div>
+              {showParticipantDropdown && !isReadOnly && (
+                <div className="absolute z-10 w-full mt-1 border rounded-lg shadow-lg" style={{ background: 'var(--theme-card-bg)', borderColor: 'var(--theme-card-border)' }}>
+                  <div className="p-2 border-b" style={{ borderColor: 'var(--theme-card-border)' }}>
+                    <input
+                      type="text"
+                      className="form-input w-full py-1.5 text-sm"
+                      placeholder="名前・メールで検索..."
+                      value={participantSearch}
+                      onInput={(e) => setParticipantSearch((e.target as HTMLInputElement).value)}
+                      onClick={(e) => e.stopPropagation()}
+                    />
+                  </div>
+                  <div className="max-h-48 overflow-y-auto p-1">
+                    {filteredMembers.length === 0 ? (
+                      <p className="text-xs p-2" style={{ color: 'var(--theme-text-secondary)' }}>一致するメンバーがいません</p>
+                    ) : (
+                      <div className="space-y-1">
+                        {filteredMembers.map((m) => {
+                          const isSelected = formData.participant_ids.includes(m.id);
+                          return (
+                            <label
+                              key={m.id}
+                              className="flex items-center gap-2 px-2 py-1.5 rounded-md cursor-pointer transition-colors"
+                              style={{ background: isSelected ? 'oklch(0.55 0.21 250 / 0.08)' : 'transparent' }}
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              <input
+                                type="checkbox" checked={isSelected}
+                                onChange={() => toggleParticipant(m.id)}
+                                className="rounded text-primary-500 focus:ring-primary-500"
+                              />
+                              <span className="text-sm" style={{ color: 'var(--theme-text)' }}>{m.name}</span>
+                              <span className="text-xs ml-auto" style={{ color: 'var(--theme-text-secondary)' }}>{m.email}</span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
                 </div>
               )}
             </div>

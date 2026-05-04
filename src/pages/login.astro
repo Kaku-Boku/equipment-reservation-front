@@ -135,16 +135,7 @@ const authError = Astro.url.searchParams.get("error");
     </div>
   </div>
 
-  <!-- Supabase 設定のクライアント公開 -->
-  <script
-    define:vars={{
-      supabaseUrl: SUPABASE_CONFIG.url,
-      supabaseKey: SUPABASE_CONFIG.anonKey,
-    }}
-  >
-    window.__SUPABASE_URL__ = supabaseUrl;
-    window.__SUPABASE_ANON_KEY__ = supabaseKey;
-  </script>
+  <!-- Supabase 設定は Layout.astro の define:vars スクリプトで既にグローバル公開済み -->
 
   <script>
     import { createBrowserClient } from "@supabase/ssr";

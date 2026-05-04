@@ -3,6 +3,15 @@
 
 import type { SupabaseClient, Session } from '@supabase/supabase-js';
 
+// cloudflare:workers モジュールの型宣言
+// Why: @ts-ignore なしで `import { env } from 'cloudflare:workers'` を
+//      使えるようにするため。Cloudflare Workers ランタイム提供の env binding を
+//      TypeScript に認識させる。
+declare module 'cloudflare:workers' {
+  const env: Cloudflare.Env;
+  export { env };
+}
+
 interface ImportMetaEnv {
   readonly PUBLIC_SUPABASE_URL: string;
   readonly PUBLIC_SUPABASE_PUBLISHABLE_KEY: string;

@@ -5,6 +5,7 @@
  *
  * - createSupabaseServerClient: Astro SSR ミドルウェア / API ルートで使用。
  *   Astro の Cookies API と連携してセッション Cookie の読み書きを行う。
+ *   env は cloudflare:workers から直接インポートするため、引数渡し不要。
  *
  * - SUPABASE_CONFIG: ブラウザ側で createClient() に渡す設定値。
  *   HTML にインライン出力して Preact コンポーネントから参照する。
@@ -12,29 +13,31 @@
 import { createServerClient, parseCookieHeader } from '@supabase/ssr';
 import { createClient } from '@supabase/supabase-js';
 import type { AstroCookies } from 'astro';
-// @ts-ignore
 import { env } from 'cloudflare:workers';
+import { logger } from './logger';
 
 /**
  * SSR 用 Supabase クライアントを生成する
  *
+ * Why: _runtimeEnv パラメータを受け取っていたが、内部では使用せず
+ *      cloudflare:workers から直接 env をインポートしていた。
+ *      不要な引数を削除し、シグネチャを明確にする。
+ *
  * @param cookies - Astro の Cookies API インスタンス
  * @param headers - リクエストヘッダー（Cookie 文字列の取得に使用）
- * @param runtimeEnv - Cloudflare のランタイム環境変数 (Bindings)
  * @returns 認証セッション付きの Supabase クライアント
  */
 export function createSupabaseServerClient(
   cookies: AstroCookies,
   headers: Headers,
-  _runtimeEnv?: any
 ) {
-  const supabaseUrl = (env as any)?.PUBLIC_SUPABASE_URL || import.meta.env.PUBLIC_SUPABASE_URL;
-  const supabaseKey = (env as any)?.PUBLIC_SUPABASE_PUBLISHABLE_KEY || import.meta.env.PUBLIC_SUPABASE_PUBLISHABLE_KEY;
+  const supabaseUrl = env?.PUBLIC_SUPABASE_URL || import.meta.env.PUBLIC_SUPABASE_URL;
+  const supabaseKey = env?.PUBLIC_SUPABASE_PUBLISHABLE_KEY || import.meta.env.PUBLIC_SUPABASE_PUBLISHABLE_KEY;
 
-  console.log('[supabase.ts] Creating server client:', {
+  logger.debug('[supabase.ts] Creating server client:', {
     hasUrl: Boolean(supabaseUrl),
     hasKey: Boolean(supabaseKey),
-    urlSource: (env as any)?.PUBLIC_SUPABASE_URL ? 'cloudflare:workers env' : 'import.meta.env'
+    urlSource: env?.PUBLIC_SUPABASE_URL ? 'cloudflare:workers env' : 'import.meta.env',
   });
 
   return createServerClient(
@@ -79,12 +82,11 @@ export const SUPABASE_CONFIG = {
  * 環境変数: SUPABASE_SERVICE_ROLE_KEY（Cloudflare Bindings / .env に設定）
  */
 export function createSupabaseAdminClient() {
-  const supabaseUrl = (env as any)?.PUBLIC_SUPABASE_URL || import.meta.env.PUBLIC_SUPABASE_URL;
-  const serviceRoleKey =
-    (env as any)?.SUPABASE_SERVICE_ROLE_KEY || import.meta.env.SUPABASE_SERVICE_ROLE_KEY;
+  const supabaseUrl = env?.PUBLIC_SUPABASE_URL || import.meta.env.PUBLIC_SUPABASE_URL;
+  const serviceRoleKey = env?.SUPABASE_SERVICE_ROLE_KEY || import.meta.env.SUPABASE_SERVICE_ROLE_KEY;
 
   if (!serviceRoleKey) {
-    console.warn(
+    logger.warn(
       '[supabase.ts] SUPABASE_SERVICE_ROLE_KEY が未設定です。' +
       'app_secrets へのアクセスは失敗します。' +
       '（Supabase ダッシュボード > API > Secret keys で取得してください）'

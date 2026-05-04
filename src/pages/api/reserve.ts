@@ -20,22 +20,11 @@ import { syncWithGoogleCalendar, syncSharedCalendar } from '../../lib/google-cal
 import type { CalendarSyncData } from '../../lib/google-calendar';
 import { createSupabaseAdminClient } from '../../lib/supabase';
 import { DEFAULT_APP_SETTINGS } from '../../lib/types';
-// @ts-ignore
+import { JSON_HEADERS } from '../../lib/api-utils';
+import { logger } from '../../lib/logger';
 import { env } from 'cloudflare:workers';
+import { validateIsoDuration, isExclusionViolation, isTimeLockError } from '../../utils/reservation-utils';
 
-const JSON_HEADERS = { 'Content-Type': 'application/json' } as const;
-
-function isExclusionViolation(error: any): boolean {
-  return (
-    error?.code === '23P01' ||
-    error?.message?.includes('conflicting key value violates exclusion constraint')
-  );
-}
-
-/** DB トリガーによる時間ロックエラーを検出 */
-function isTimeLockError(error: any): boolean {
-  return error?.message?.includes('時間以上経過');
-}
 
 async function getParticipantEmails(supabase: any, participantIds: string[]): Promise<string[]> {
   if (!participantIds || participantIds.length === 0) return [];
@@ -47,29 +36,6 @@ async function getParticipantEmails(supabase: any, participantIds: string[]): Pr
 async function getAppSettings(supabase: any) {
   const { data } = await supabase.from('app_settings').select('*').single();
   return data || DEFAULT_APP_SETTINGS;
-}
-
-/** 予約時間のバリデーション（min/max） */
-function validateDuration(
-  startTime: string,
-  endTime: string,
-  minMinutes: number,
-  maxHours: number
-): string | null {
-  const start = new Date(startTime);
-  const end = new Date(endTime);
-  const durationMin = (end.getTime() - start.getTime()) / 60000;
-
-  if (durationMin < minMinutes) {
-    return `予約時間は最低 ${minMinutes} 分以上必要です。`;
-  }
-  if (durationMin % minMinutes !== 0) {
-    return `予約時間は ${minMinutes} 分単位で設定してください。`;
-  }
-  if (durationMin > maxHours * 60) {
-    return `1回あたりの予約は最大 ${maxHours} 時間までです。`;
-  }
-  return null;
 }
 
 // =========================================
@@ -100,7 +66,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
 
     // app_settings によるバリデーション
     const settings = await getAppSettings(supabase);
-    const durationError = validateDuration(
+    const durationError = validateIsoDuration(
       start_time, end_time,
       settings.min_reservation_minutes,
       settings.max_reservation_hours
@@ -146,17 +112,19 @@ export const POST: APIRoute = async ({ request, locals }) => {
           { status: 409, headers: JSON_HEADERS }
         );
       }
-      console.error('[api/reserve POST] INSERT エラー:', insertError);
+      logger.error('[api/reserve POST] INSERT エラー:', insertError);
       return new Response(JSON.stringify({ error: '予約の作成に失敗しました。' }), { status: 500, headers: JSON_HEADERS });
     }
+
 
     // 参加者を INSERT
     if (participant_ids?.length > 0) {
       const { error: participantError } = await supabase
         .from('reservation_participants')
         .insert(participant_ids.map((member_id: string) => ({ reservation_id: reservation.id, member_id })));
-      if (participantError) console.error('[api/reserve POST] 参加者 INSERT エラー:', participantError);
+      if (participantError) logger.error('[api/reserve POST] 参加者 INSERT エラー:', participantError);
     }
+
 
     // Google カレンダー同期（approved の場合のみ）
     if (status === 'approved') {
@@ -171,7 +139,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
       };
 
       const syncResult = await syncWithGoogleCalendar('create', syncData, supabase, member.id, env);
-      if (!syncResult.synced) console.warn('[api/reserve POST] 個人カレンダー同期スキップ:', syncResult.error);
+      if (!syncResult.synced) logger.warn('[api/reserve POST] 個人カレンダー同期スキップ:', syncResult.error);
 
       // 共有カレンダー同期
       if (settings.shared_calendar_enabled) {
@@ -216,7 +184,7 @@ export const PUT: APIRoute = async ({ request, locals }) => {
     }
 
     const settings = await getAppSettings(supabase);
-    const durationError = validateDuration(start_time, end_time, settings.min_reservation_minutes, settings.max_reservation_hours);
+    const durationError = validateIsoDuration(start_time, end_time, settings.min_reservation_minutes, settings.max_reservation_hours);
     if (durationError) return new Response(JSON.stringify({ error: durationError }), { status: 400, headers: JSON_HEADERS });
 
     const { data: existing } = await supabase
@@ -313,8 +281,23 @@ export const DELETE: APIRoute = async ({ request, locals }) => {
       startTime: existing.start_time, endTime: existing.end_time, purpose: existing.purpose,
     };
 
+    // Why: DB 削除を先に行い、成功した場合のみカレンダーを削除する。
+    // 逆順序は、DB 削除がトリガーの時間ロックで失敗した場合に
+    // カレンダーイベントだけ削除されてデータ不整合が生じるリスクがある。
+    await supabase.from('reservation_participants').delete().eq('reservation_id', id);
+
+    const { error: deleteError } = await supabase.from('reservations').delete().eq('id', id);
+    if (deleteError) {
+      if (isTimeLockError(deleteError)) {
+        return new Response(JSON.stringify({ error: deleteError.message }), { status: 409, headers: JSON_HEADERS });
+      }
+      logger.error('[api/reserve DELETE] 削除エラー:', deleteError);
+      return new Response(JSON.stringify({ error: '予約の削除に失敗しました。' }), { status: 500, headers: JSON_HEADERS });
+    }
+
+    // DB 削除成功後にカレンダー削除（失敗しても DB は正しい状態）
     const syncResult = await syncWithGoogleCalendar('delete', syncData, supabase, existing.created_by, env);
-    if (!syncResult.synced) console.warn('[api/reserve DELETE] 個人カレンダー同期スキップ:', syncResult.error);
+    if (!syncResult.synced) logger.warn('[api/reserve DELETE] 個人カレンダー同期スキップ:', syncResult.error);
 
     // 共有カレンダーからも削除
     if (existing.shared_event_id) {
@@ -325,20 +308,10 @@ export const DELETE: APIRoute = async ({ request, locals }) => {
       }
     }
 
-    await supabase.from('reservation_participants').delete().eq('reservation_id', id);
-
-    const { error: deleteError } = await supabase.from('reservations').delete().eq('id', id);
-    if (deleteError) {
-      if (isTimeLockError(deleteError)) {
-        return new Response(JSON.stringify({ error: deleteError.message }), { status: 409, headers: JSON_HEADERS });
-      }
-      console.error('[api/reserve DELETE] 削除エラー:', deleteError);
-      return new Response(JSON.stringify({ error: '予約の削除に失敗しました。' }), { status: 500, headers: JSON_HEADERS });
-    }
-
     return new Response(JSON.stringify({ ok: true }), { status: 200, headers: JSON_HEADERS });
   } catch (err) {
-    console.error('[api/reserve DELETE] 予期せぬエラー:', err);
+    logger.error('[api/reserve DELETE] 予期せぬエラー:', err);
     return new Response(JSON.stringify({ error: 'サーバーエラーが発生しました。' }), { status: 500, headers: JSON_HEADERS });
   }
 };
+

@@ -12,6 +12,7 @@
  * - maxFutureDate を超えた日付はクリック不可・グレーアウト（管理者は除外）
  */
 import { useMemo } from 'preact/hooks';
+import { toDateStr } from '../../utils/date-utils';
 
 interface Member {
   id: string;
@@ -26,6 +27,8 @@ interface Props {
   currentMember: Member;
   /** 予約可能な最大日付（この日以降はクリック不可）。管理者は undefined = 制限なし */
   maxFutureDate?: Date;
+  /** 予約可能な過去最大日（この日以前はクリック不可）。管理者は undefined = 制限なし */
+  maxPastDate?: Date;
 }
 
 interface CalendarDay {
@@ -45,20 +48,20 @@ export default function CalendarView({
   reservations,
   currentMember,
   maxFutureDate,
+  maxPastDate,
 }: Props) {
   const year = calendarDate.getFullYear();
   const month = calendarDate.getMonth();
 
-  const todayStr = useMemo(() => {
-    const t = new Date();
-    return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`;
-  }, []);
+  // Why: useMemo の空依存配列だと初回マウント時に固定されてしまい、
+  //      日付をまたいでブラウザを開き続けた場合に今日ハイライトが更新されない。
+  //      計算コストが極めて低いため useMemo を使わず毎回計算する。
+  const t = new Date();
+  const todayStr = toDateStr(t);
 
-  const toDateStr = (d: Date): string =>
-    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-
-  // maxFutureDate を "YYYY-MM-DD" 文字列に変換（比較用）
+  // maxFutureDate/maxPastDate を "YYYY-MM-DD" 文字列に変換（比較用）
   const maxFutureDateStr = maxFutureDate ? toDateStr(maxFutureDate) : null;
+  const maxPastDateStr = maxPastDate ? toDateStr(maxPastDate) : null;
 
   const days = useMemo((): CalendarDay[] => {
     const firstDay = new Date(year, month, 1);
@@ -73,7 +76,7 @@ export default function CalendarView({
       calendarDays.push({
         type: 'other', day: d.getDate(), dateStr,
         count: 0, hasOwnReservation: false, dow: d.getDay(),
-        isOutOfRange: maxFutureDateStr ? dateStr > maxFutureDateStr : false,
+        isOutOfRange: (maxFutureDateStr ? dateStr > maxFutureDateStr : false) || (maxPastDateStr ? dateStr < maxPastDateStr : false),
       });
     }
 
@@ -85,7 +88,7 @@ export default function CalendarView({
       calendarDays.push({
         type: 'current', day: d, dateStr,
         count: dayReservations.length, hasOwnReservation: hasOwn, dow: date.getDay(),
-        isOutOfRange: maxFutureDateStr ? dateStr > maxFutureDateStr : false,
+        isOutOfRange: (maxFutureDateStr ? dateStr > maxFutureDateStr : false) || (maxPastDateStr ? dateStr < maxPastDateStr : false),
       });
     }
 
@@ -97,12 +100,12 @@ export default function CalendarView({
       calendarDays.push({
         type: 'other', day: d.getDate(), dateStr,
         count: 0, hasOwnReservation: false, dow: d.getDay(),
-        isOutOfRange: maxFutureDateStr ? dateStr > maxFutureDateStr : false,
+        isOutOfRange: (maxFutureDateStr ? dateStr > maxFutureDateStr : false) || (maxPastDateStr ? dateStr < maxPastDateStr : false),
       });
     }
 
     return calendarDays;
-  }, [year, month, reservations, currentMember, maxFutureDateStr]);
+  }, [year, month, reservations, currentMember, maxFutureDateStr, maxPastDateStr]);
 
   return (
     <div className="animate-fade-in w-full max-w-5xl mx-auto">
@@ -135,7 +138,7 @@ export default function CalendarView({
               key={d.dateStr}
               className={`flex flex-col items-center pt-2 pb-1 px-1 sm:pt-3 sm:px-2 rounded-xl transition-all duration-200 min-h-[70px] sm:min-h-[90px] aspect-square relative ${
                 isDisabled ? 'cursor-not-allowed' : 'cursor-pointer'
-              }`}
+              } ${!isOtherMonth && !isDisabled ? 'hover:-translate-y-0.5 hover:shadow-md hover:z-10 bg-theme-card' : ''}`}
               style={{
                 background: isToday
                   ? 'var(--theme-today-bg)'
@@ -151,16 +154,6 @@ export default function CalendarView({
               }}
               onClick={() => {
                 if (!isDisabled) onSelectDate(d.dateStr);
-              }}
-              onMouseEnter={(e) => {
-                if (!isOtherMonth && !isDisabled) {
-                  (e.currentTarget as HTMLElement).style.transform = 'translateY(-2px)';
-                  (e.currentTarget as HTMLElement).style.boxShadow = 'var(--shadow-md)';
-                }
-              }}
-              onMouseLeave={(e) => {
-                (e.currentTarget as HTMLElement).style.transform = '';
-                (e.currentTarget as HTMLElement).style.boxShadow = '';
               }}
             >
               {/* 予約不可バッジ（範囲外） */}

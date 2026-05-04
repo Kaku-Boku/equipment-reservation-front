@@ -79,7 +79,7 @@ const isAdmin = memberRole === 'admin';
       {isAdmin && (
         <a
           href="/admin"
-          class="hidden sm:flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-all hover:shadow-sm no-underline"
+          class="flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-all hover:shadow-sm no-underline"
           style="
             border-color: oklch(0.55 0.21 250 / 0.3);
             background: oklch(0.55 0.21 250 / 0.06);
@@ -91,18 +91,6 @@ const isAdmin = memberRole === 'admin';
             <path d="M19.07 4.93l-1.41 1.41M5.34 18.66l-1.41 1.41M20.49 12H22M2 12h1.51M19.07 19.07l-1.41-1.41M5.34 5.34 3.93 3.93M12 20.49V22M12 2v1.51"></path>
           </svg>
           システム管理
-        </a>
-        <!-- モバイル用: アイコンのみ -->
-        <a
-          href="/admin"
-          class="sm:hidden nav-btn"
-          title="システム管理"
-          aria-label="システム管理"
-        >
-          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <circle cx="12" cy="12" r="3"></circle>
-            <path d="M19.07 4.93l-1.41 1.41M5.34 18.66l-1.41 1.41M20.49 12H22M2 12h1.51M19.07 19.07l-1.41-1.41M5.34 5.34 3.93 3.93M12 20.49V22M12 2v1.51"></path>
-          </svg>
         </a>
       )}
 

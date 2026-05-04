@@ -6,7 +6,7 @@
  * 2. getUser() で JWT を検証し、期限切れなら自動リフレッシュ
  * 3. Astro.locals にクライアント・セッション・メンバー情報を注入
  * 4. 保護ルートへの未認証アクセスを /login へリダイレクト
- * 5. /admin/* への非管理者アクセスを / へリダイレクト
+ * 5. /admin/* および /api/admin/* への非管理者アクセスを制限
  *
  * 【重要】
  * getSession() は Cookie から JWT を読むだけで検証しない。
@@ -15,40 +15,47 @@
  * 永続セッションを実現するため、ミドルウェアでは必ず getUser() を使う。
  */
 import { defineMiddleware } from 'astro:middleware';
-// @ts-ignore
 import { createSupabaseServerClient } from './lib/supabase';
-// @ts-ignore
-import { env } from 'cloudflare:workers';
+import { logger } from './lib/logger';
 
-/** 認証不要なパスのプレフィックス一覧 */
+/**
+ * 認証不要なパスのプレフィックス一覧
+ * Why: startsWith を使うことで /login?redirect=... のようなクエリパラメータ付き
+ *      アクセスや /auth/callback?code=xxx も正しくパブリックパスとして判定する。
+ */
 const PUBLIC_PATHS = [
   '/login',
   '/auth/callback',
   '/api/pre-check',
 ];
 
-/** 管理者のみアクセス可能なパスのプレフィックス一覧 */
-const ADMIN_PATHS = ['/admin'];
+/**
+ * 管理者のみアクセス可能なパスのプレフィックス一覧
+ * Why: /api/admin/* も含めることで、ミドルウェアレベルで管理者 API を保護する。
+ *      各 API ルートの個別チェックは防御的実装として残すが、二重ガードにより安全性を高める。
+ */
+const ADMIN_PATHS = ['/admin', '/api/admin'];
 
 export const onRequest = defineMiddleware(async ({ locals, cookies, request, redirect }, next) => {
-  console.log('[middleware] Request started:', request.url);
+  logger.debug('[middleware] Request started:', request.url);
 
-  const supabase = createSupabaseServerClient(cookies, request.headers, env);
+  // Why: createSupabaseServerClient は env を内部で直接インポートするため、引数渡し不要
+  const supabase = createSupabaseServerClient(cookies, request.headers);
   locals.supabase = supabase;
   locals.session = null;
   locals.member = null;
 
   const url = new URL(request.url);
   const isPublicPath = PUBLIC_PATHS.some((path) => url.pathname.startsWith(path));
-  console.log('[middleware] Path:', url.pathname, 'isPublic:', isPublicPath);
+  logger.debug('[middleware] Path:', url.pathname, 'isPublic:', isPublicPath);
 
   // ── JWT 検証 & トークンリフレッシュ ──
   try {
-    console.log('[middleware] Verifying JWT...');
+    logger.debug('[middleware] Verifying JWT...');
     const { data: { user }, error: userError } = await supabase.auth.getUser();
 
     if (user && !userError) {
-      console.log('[middleware] User found:', user.email);
+      logger.debug('[middleware] User found:', user.email);
       const { data: { session } } = await supabase.auth.getSession();
       locals.session = session;
 
@@ -60,30 +67,41 @@ export const onRequest = defineMiddleware(async ({ locals, cookies, request, red
         .single();
 
       locals.member = member;
-      console.log('[middleware] Member loaded:', member?.name, 'role:', member?.role);
+      logger.debug('[middleware] Member loaded:', member?.name, 'role:', member?.role);
 
       if (url.pathname === '/login') {
-        console.log('[middleware] Logged in user on /login, redirecting to /');
+        logger.debug('[middleware] Logged in user on /login, redirecting to /');
         return redirect('/');
       }
 
-      // ── 管理者ルートの保護 ──
+      // ── 管理者ルートの保護（ページ + API） ──
       const isAdminPath = ADMIN_PATHS.some((path) => url.pathname.startsWith(path));
       if (isAdminPath && member?.role !== 'admin') {
-        console.log('[middleware] Non-admin accessing admin path, redirecting to /');
+        logger.debug('[middleware] Non-admin accessing admin path, redirecting to /');
+        // API パスの場合は 403 を返す（リダイレクトは不適切）
+        if (url.pathname.startsWith('/api/')) {
+          return new Response(
+            JSON.stringify({ error: '管理者のみアクセスできます。' }),
+            { status: 403, headers: { 'Content-Type': 'application/json' } }
+          );
+        }
         return redirect('/');
       }
     } else {
-      console.log('[middleware] No user or error:', userError?.message);
+      logger.debug('[middleware] No user or error:', userError?.message);
       if (!isPublicPath) {
-        console.log('[middleware] Protected path, redirecting to /login');
+        logger.debug('[middleware] Protected path, redirecting to /login');
         return redirect('/login');
       }
     }
   } catch (err) {
-    console.error('[middleware] Unexpected error:', err);
+    logger.error('[middleware] Unexpected error:', err);
+    // Why: 認証処理で例外発生時はリクエストを保護ルートに通過させない
+    if (!isPublicPath) {
+      return redirect('/login');
+    }
   }
 
-  console.log('[middleware] Proceeding to next...');
+  logger.debug('[middleware] Proceeding to next...');
   return next();
 });

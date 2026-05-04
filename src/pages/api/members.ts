@@ -4,14 +4,15 @@
  * status='active' なメンバーのみ返却する（参加者選択用）。
  */
 import type { APIRoute } from 'astro';
-
-/** JSON レスポンスの共通ヘッダー */
-const JSON_HEADERS = { 'Content-Type': 'application/json' } as const;
+import { JSON_HEADERS, errorResponse } from '../../lib/api-utils';
+import { logger } from '../../lib/logger';
 
 export const GET: APIRoute = async ({ locals }) => {
-  const { session, supabase } = locals;
+  // Why: session のみでなく member もチェックする
+  //      inactive なユーザーや未登録ユーザーはアクセス不可
+  const { session, member, supabase } = locals;
 
-  if (!session) {
+  if (!session || !member) {
     return new Response(
       JSON.stringify({ error: '認証が必要です。' }),
       { status: 401, headers: JSON_HEADERS }
@@ -25,11 +26,8 @@ export const GET: APIRoute = async ({ locals }) => {
     .order('name');
 
   if (error) {
-    console.error('[api/members] 取得エラー:', error);
-    return new Response(
-      JSON.stringify({ error: 'メンバー情報の取得に失敗しました。' }),
-      { status: 500, headers: JSON_HEADERS }
-    );
+    logger.error('[api/members] 取得エラー:', error);
+    return errorResponse('メンバー情報の取得に失敗しました。');
   }
 
   return new Response(

@@ -6,18 +6,17 @@
  */
 import type { APIRoute } from 'astro';
 import { createSupabaseAdminClient } from '../../../lib/supabase';
+import { JSON_HEADERS, checkAdmin, errorResponse } from '../../../lib/api-utils';
+import { logger } from '../../../lib/logger';
 
-const JSON_HEADERS = { 'Content-Type': 'application/json' } as const;
 
 export const POST: APIRoute = async ({ locals }) => {
-  const { session, member, supabase } = locals;
+  const check = checkAdmin(locals);
+  if (!check.ok) {
+    return new Response(JSON.stringify({ error: check.message }), { status: check.status, headers: JSON_HEADERS });
+  }
 
-  if (!session || !member) {
-    return new Response(JSON.stringify({ error: '認証が必要です。' }), { status: 401, headers: JSON_HEADERS });
-  }
-  if (member.role !== 'admin') {
-    return new Response(JSON.stringify({ error: '管理者のみ設定できます。' }), { status: 403, headers: JSON_HEADERS });
-  }
+  const { supabase, member } = locals;
 
   try {
     // 1. user_tokens から現在の管理者の refresh_token を取得
@@ -28,7 +27,8 @@ export const POST: APIRoute = async ({ locals }) => {
       .single();
 
     if (tokenError || !tokenData || !tokenData.refresh_token) {
-      console.error('[api/admin/link-shared-calendar] token error:', tokenError);
+      logger.error('[api/admin/link-shared-calendar] token error:', tokenError);
+
       return new Response(
         JSON.stringify({ error: 'トークンが見つかりません。一度ログアウトし、再ログインしてください。' }),
         { status: 400, headers: JSON_HEADERS }
@@ -46,9 +46,10 @@ export const POST: APIRoute = async ({ locals }) => {
       .eq('id', 1);
 
     if (secretsError) {
-      console.error('[api/admin/link-shared-calendar] secrets update error:', secretsError);
-      return new Response(JSON.stringify({ error: 'トークンの保存に失敗しました。' }), { status: 500, headers: JSON_HEADERS });
+      logger.error('[api/admin/link-shared-calendar] secrets update error:', secretsError);
+      return errorResponse('トークンの保存に失敗しました。');
     }
+
 
     // 3. app_settings の更新
     const { error: settingsError } = await supabase
@@ -61,13 +62,15 @@ export const POST: APIRoute = async ({ locals }) => {
       .eq('id', 1);
 
     if (settingsError) {
-      console.error('[api/admin/link-shared-calendar] settings update error:', settingsError);
-      return new Response(JSON.stringify({ error: '設定の更新に失敗しました。' }), { status: 500, headers: JSON_HEADERS });
+      logger.error('[api/admin/link-shared-calendar] settings update error:', settingsError);
+      return errorResponse('設定の更新に失敗しました。');
     }
+
 
     return new Response(JSON.stringify({ ok: true, email: member.email }), { status: 200, headers: JSON_HEADERS });
   } catch (err) {
-    console.error('[api/admin/link-shared-calendar] unexpected error:', err);
-    return new Response(JSON.stringify({ error: 'サーバーエラーが発生しました。' }), { status: 500, headers: JSON_HEADERS });
+    logger.error('[api/admin/link-shared-calendar] unexpected error:', err);
+    return errorResponse('サーバーエラーが発生しました。');
   }
+
 };

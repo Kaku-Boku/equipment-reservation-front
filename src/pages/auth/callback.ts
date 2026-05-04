@@ -16,43 +16,49 @@
  */
 import type { APIRoute } from 'astro';
 import { createSupabaseServerClient } from '../../lib/supabase';
-// @ts-ignore
-import { env } from 'cloudflare:workers';
+import { logger } from '../../lib/logger';
+
 
 export const GET: APIRoute = async ({ request, cookies, redirect, locals }) => {
   const requestUrl = new URL(request.url);
   const code = requestUrl.searchParams.get('code');
 
-  console.log('[auth/callback] ========== コールバック開始 ==========');
+  logger.debug('[auth/callback] ========== コールバック開始 ==========');
+
 
   if (!code) {
-    console.error('[auth/callback] code パラメータがありません');
+    logger.error('[auth/callback] code パラメータがありません');
+
     return redirect('/login?error=no_code');
   }
 
-  const supabase = createSupabaseServerClient(cookies, request.headers, env);
+  const supabase = createSupabaseServerClient(cookies, request.headers);
+
 
   // ── 1. 認可コード → セッション交換 ──
   const { data, error } = await supabase.auth.exchangeCodeForSession(code);
 
   if (error) {
-    console.error('[auth/callback] exchangeCodeForSession エラー:', {
+    logger.error('[auth/callback] exchangeCodeForSession エラー:', {
       message: error.message,
       status: error.status,
     });
+
     return redirect('/login?error=auth_failed');
   }
 
   if (!data?.session) {
-    console.error('[auth/callback] セッションが返されませんでした');
+    logger.error('[auth/callback] セッションが返されませんでした');
+
     return redirect('/login?error=no_session');
   }
 
   const { session } = data;
-  console.log('[auth/callback] セッション交換成功:', {
+  logger.debug('[auth/callback] セッション交換成功:', {
     user_email: session.user?.email,
     has_provider_refresh_token: Boolean(session.provider_refresh_token),
   });
+
 
   // ── 2. provider_refresh_token を user_tokens テーブルに保存 ──
   //
@@ -72,7 +78,8 @@ export const GET: APIRoute = async ({ request, cookies, redirect, locals }) => {
         .single();
 
       if (memberError || !member) {
-        console.error('[auth/callback] members にユーザーが見つかりません:', userEmail);
+        logger.error('[auth/callback] members にユーザーが見つかりません:', userEmail);
+
       } else {
         const { error: upsertError } = await supabase
           .from('user_tokens')
@@ -86,23 +93,26 @@ export const GET: APIRoute = async ({ request, cookies, redirect, locals }) => {
           );
 
         if (upsertError) {
-          console.error('[auth/callback] user_tokens UPSERT エラー:', upsertError.message);
+          logger.error('[auth/callback] user_tokens UPSERT エラー:', upsertError.message);
         } else {
-          console.log('[auth/callback] refresh_token 保存成功 (member_id:', member.id, ')');
+          logger.debug('[auth/callback] refresh_token 保存成功 (member_id:', member.id, ')');
         }
+
       }
     }
   } else {
     // provider_refresh_token が null → Google Calendar 連携が不可
     tokenWarning = true;
-    console.warn('[auth/callback] provider_refresh_token が返されませんでした。', {
+    logger.warn('[auth/callback] provider_refresh_token が返されませんでした。', {
       user_email: session.user?.email,
       hint: 'prompt: "consent" + access_type: "offline" の設定を確認してください。',
     });
+
   }
 
   // ── 3. 認証成功 → ホームへリダイレクト ──
-  console.log('[auth/callback] ========== コールバック完了 ==========');
+  logger.debug('[auth/callback] ========== コールバック完了 ==========');
+
 
   if (tokenWarning) {
     return redirect('/?warning=token_missing');

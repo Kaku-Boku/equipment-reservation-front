@@ -9,18 +9,14 @@
  * ネストされたデータを一度のクエリで取得する。
  */
 import type { APIRoute } from 'astro';
-
-/** JSON レスポンスの共通ヘッダー */
-const JSON_HEADERS = { 'Content-Type': 'application/json' } as const;
+import { JSON_HEADERS, errorResponse } from '../../lib/api-utils';
+import { logger } from '../../lib/logger';
 
 export const GET: APIRoute = async ({ request, locals }) => {
-  const { session, supabase } = locals;
+  const { session, member, supabase } = locals;
 
-  if (!session) {
-    return new Response(
-      JSON.stringify({ error: '認証が必要です。' }),
-      { status: 401, headers: JSON_HEADERS }
-    );
+  if (!session || !member) {
+    return errorResponse('認証が必要です。', 401);
   }
 
   const url = new URL(request.url);
@@ -53,12 +49,10 @@ export const GET: APIRoute = async ({ request, locals }) => {
         .order('start_time');
 
       if (error) {
-        console.error('[api/reservations] 日次取得エラー:', error);
-        return new Response(
-          JSON.stringify({ error: '予約データの取得に失敗しました。' }),
-          { status: 500, headers: JSON_HEADERS }
-        );
+        logger.error('[api/reservations] 日次取得エラー:', error);
+        return errorResponse('予約データの取得に失敗しました。');
       }
+
 
       return new Response(
         JSON.stringify({ reservations }),
@@ -80,12 +74,10 @@ export const GET: APIRoute = async ({ request, locals }) => {
         .order('start_time');
 
       if (error) {
-        console.error('[api/reservations] 月次取得エラー:', error);
-        return new Response(
-          JSON.stringify({ error: '予約データの取得に失敗しました。' }),
-          { status: 500, headers: JSON_HEADERS }
-        );
+        logger.error('[api/reservations] 月次取得エラー:', error);
+        return errorResponse('予約データの取得に失敗しました。');
       }
+
 
       // 日付ごとの件数を集計
       const countByDate: Record<string, number> = {};
@@ -106,10 +98,8 @@ export const GET: APIRoute = async ({ request, locals }) => {
       );
     }
   } catch (err) {
-    console.error('[api/reservations] 予期せぬエラー:', err);
-    return new Response(
-      JSON.stringify({ error: 'サーバーエラーが発生しました。' }),
-      { status: 500, headers: JSON_HEADERS }
-    );
+    logger.error('[api/reservations] 予期せぬエラー:', err);
+    return errorResponse('サーバーエラーが発生しました。');
   }
+
 };

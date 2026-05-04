@@ -12,6 +12,8 @@
  * - 空きスロットのクリック → 新規予約モーダルを開く（active 設備のみ）
  * - 予約ブロックのクリック → 編集/閲覧モーダルを開く
  */
+import { calculateTimelinePosition } from '../../utils/date-utils';
+import { getReservationColor } from '../../utils/reservation-utils';
 
 interface Member {
   id: string;
@@ -39,49 +41,6 @@ interface Props {
 }
 
 const SLOT_HEIGHT = 30;
-
-function calculatePosition(timeStr: string, startHour: number, slotHeight: number): number {
-  if (!timeStr) return 0;
-  const timePart = timeStr.includes('T')
-    ? timeStr.split('T')[1]
-    : timeStr.includes(' ')
-      ? timeStr.split(' ')[1]
-      : timeStr;
-  const [hourStr, minStr] = timePart.split(':');
-  const hours = parseInt(hourStr, 10);
-  const minutes = parseInt(minStr, 10);
-  if (isNaN(hours) || isNaN(minutes)) return 0;
-  const minutesFromStart = (hours - startHour) * 60 + minutes;
-  return (Math.max(0, minutesFromStart) / 30) * slotHeight;
-}
-
-/** 予約ステータスに応じた色を返す */
-function getReservationColor(status: string | undefined, isOwner: boolean) {
-  if (status === 'pending') {
-    return {
-      background: isOwner
-        ? 'linear-gradient(135deg, oklch(0.65 0.18 60), oklch(0.60 0.17 50))'
-        : 'var(--theme-input-bg)',
-      borderColor: 'oklch(0.70 0.18 60)',
-      color: isOwner ? 'white' : 'var(--theme-text)',
-    };
-  }
-  if (status === 'rejected') {
-    return {
-      background: 'oklch(0.62 0.22 25 / 0.15)',
-      borderColor: 'oklch(0.62 0.22 25 / 0.5)',
-      color: 'var(--theme-text)',
-    };
-  }
-  // approved (default)
-  return {
-    background: isOwner
-      ? 'linear-gradient(135deg, oklch(0.55 0.21 250), oklch(0.50 0.19 260))'
-      : 'var(--theme-input-bg)',
-    borderColor: isOwner ? 'oklch(0.66 0.17 245)' : 'var(--theme-text-secondary)',
-    color: isOwner ? 'white' : 'var(--theme-text)',
-  };
-}
 
 export default function TimelineView({
   timelineDate,
@@ -147,8 +106,14 @@ export default function TimelineView({
 
           {/* 1列目: 時刻ラベル */}
           <div className="relative" style={{ borderRight: '1px solid var(--theme-card-border)' }}>
+            {/* 
+              What: endHour の時刻ラベルは表示するが、対応するスロットは生成しない
+              Why: endHour は「営業終了時刻」であり、endHour 開始の予約は不可。
+                   ラベルだけ表示して最終スロットの終了を示す。
+            */}
             {Array.from({ length: endHour - startHour + 1 }).map((_, i) => (
               <div
+
                 key={i}
                 className="relative text-right pr-2 text-xs font-medium"
                 style={{ height: SLOT_HEIGHT * 2, color: 'var(--theme-text-secondary)' }}
@@ -198,20 +163,12 @@ export default function TimelineView({
                   return (
                     <div
                       key={slotIdx}
-                      className={`transition-colors ${isMaintenance ? 'cursor-not-allowed' : 'cursor-pointer'}`}
+                      className={`transition-colors ${isMaintenance ? 'cursor-not-allowed' : 'cursor-pointer hover:bg-theme-slot-hover'}`}
                       style={{
                         height: SLOT_HEIGHT,
                         borderBottom: isHourBoundary
                           ? '1px solid var(--theme-timeline-line)'
                           : '1px dashed var(--theme-timeline-dashed)',
-                      }}
-                      onMouseEnter={(e) => {
-                        if (!isMaintenance) {
-                          (e.currentTarget as HTMLElement).style.background = 'var(--theme-slot-hover)';
-                        }
-                      }}
-                      onMouseLeave={(e) => {
-                        (e.currentTarget as HTMLElement).style.background = '';
                       }}
                       onClick={() => {
                         if (!isMaintenance) {
@@ -229,8 +186,8 @@ export default function TimelineView({
                 {reservations
                   .filter(r => r.facilities?.id === f.id)
                   .map(r => {
-                    const top = calculatePosition(r.start_time, startHour, SLOT_HEIGHT);
-                    const rawEnd = calculatePosition(r.end_time, startHour, SLOT_HEIGHT);
+                    const top = calculateTimelinePosition(r.start_time, startHour, SLOT_HEIGHT);
+                    const rawEnd = calculateTimelinePosition(r.end_time, startHour, SLOT_HEIGHT);
                     const clippedEnd = Math.min(rawEnd, maxHeightPx);
                     const height = Math.max(clippedEnd - top, 10);
                     const isOwner = r.created_by_member?.id === currentMember?.id;

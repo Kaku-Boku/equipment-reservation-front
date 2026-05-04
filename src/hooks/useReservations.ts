@@ -43,6 +43,7 @@ interface Reservation {
  * @param initialRange   - SSR でフェッチした日付範囲
  * @param supabaseUrl    - Supabase プロジェクトURL
  * @param supabaseKey    - Supabase 匿名キー
+ * @param accessToken    - 認証済みセッショントークン
  * @param maxFutureDate  - フェッチの未来方向の上限日（管理者は undefined = 制限なし）
  */
 export function useReservations(
@@ -50,17 +51,24 @@ export function useReservations(
   initialRange: DateRange,
   supabaseUrl: string,
   supabaseKey: string,
+  accessToken: string,
   maxFutureDate?: Date
 ) {
+
   const [reservations, setReservations] = useState<Reservation[]>(initialData);
   const [loadedRange, setLoadedRange] = useState<DateRange>(initialRange);
   const [isFetchingMore, setIsFetchingMore] = useState(false);
 
   // Supabase クライアントをメモ化（再レンダーで再生成しない）
   const supabase = useMemo<SupabaseClient>(
-    () => createClient(supabaseUrl, supabaseKey),
-    [supabaseUrl, supabaseKey]
+    () => createClient(supabaseUrl, supabaseKey, {
+      global: { headers: { Authorization: `Bearer ${accessToken}` } },
+      accessToken: async () => accessToken,
+    }),
+    [supabaseUrl, supabaseKey, accessToken]
   );
+
+
 
   /** JOIN 付きの SELECT クエリ文字列（統一して使う） */
   const SELECT_WITH_JOINS =

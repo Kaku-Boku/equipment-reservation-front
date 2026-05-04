@@ -13,12 +13,16 @@
  * 2. フックが Realtime で差分同期 & ナビ時に追加取得
  * 3. useMemo で月/日単位にフィルタし、子コンポーネントへ配信
  */
-import { useState, useMemo } from 'preact/hooks';
+import { useState, useMemo, useEffect } from 'preact/hooks';
+import { createClient } from '@supabase/supabase-js';
 import CalendarView from './CalendarView';
 import TimelineView from './TimelineView';
 import ReservationModal from './ReservationModal';
-import { useReservations } from '../hooks/useReservations';
-import type { AppSettings, Member, Facility } from '../lib/types';
+import { useReservations } from '../../hooks/useReservations';
+import { useReservationMutations } from '../../hooks/useReservationMutations';
+import { useRealtimeSync } from '../../hooks/useRealtimeSync';
+import { formatDateJa, toDateStr } from '../../utils/date-utils';
+import type { AppSettings, Member, Facility } from '../../lib/types';
 
 interface Props {
   initialFacilities: Facility[];
@@ -28,8 +32,10 @@ interface Props {
   initialLoadedRange: { start: string; end: string };
   supabaseUrl: string;
   supabaseKey: string;
+  accessToken: string;
   appSettings: AppSettings;
 }
+
 
 interface ModalState {
   isOpen: boolean;
@@ -45,8 +51,10 @@ export default function ReservationApp({
   initialLoadedRange,
   supabaseUrl,
   supabaseKey,
+  accessToken,
   appSettings,
 }: Props) {
+
   const isAdmin = currentMember?.role === 'admin';
 
   // ── 予約可能最大日（admin は制限なし） ──
@@ -56,6 +64,15 @@ export default function ReservationApp({
     d.setDate(d.getDate() + appSettings.reservation_lead_time_days);
     return d;
   }, [isAdmin, appSettings.reservation_lead_time_days]);
+
+  // ── 予約可能過去最大日（2ヶ月前、adminは制限なし） ──
+  const maxPastDate = useMemo(() => {
+    if (isAdmin) return undefined;
+    const d = new Date();
+    d.setMonth(d.getMonth() - 2);
+    d.setHours(0, 0, 0, 0);
+    return d;
+  }, [isAdmin]);
 
   const [currentView, setCurrentView] = useState<'calendar' | 'timeline'>('calendar');
   const [calendarDate, setCalendarDate] = useState(new Date());
@@ -67,13 +84,23 @@ export default function ReservationApp({
     initialData: null,
   });
 
+  const [facilities, setFacilities] = useState<Facility[]>(initialFacilities);
+  const [members, setMembers] = useState<Member[]>(initialMembers);
+
+  // ── Realtime 購読 (facilities & members) ──
+  useRealtimeSync(supabaseUrl, supabaseKey, accessToken, setFacilities, setMembers as any);
+
+
   const { reservations, fetchMoreIfNeeded, isFetchingMore } = useReservations(
     initialReservations,
     initialLoadedRange,
     supabaseUrl,
     supabaseKey,
+    accessToken,
     maxFutureDate
   );
+
+  const { saveReservation, deleteReservation, updateReservationStatus } = useReservationMutations();
 
   // ── 表示データのフィルタリング ──
   const monthReservations = useMemo(() => {
@@ -88,28 +115,14 @@ export default function ReservationApp({
 
   // active な設備のみをモーダル選択肢に（メンテナンス中は予約作成不可）
   const activeFacilities = useMemo(
-    () => initialFacilities.filter(f => f.status === 'active'),
-    [initialFacilities]
+    () => facilities.filter((f: Facility) => f.status === 'active'),
+    [facilities]
   );
-
-  // ── ユーティリティ ──
-  const toLocalDate = (date: Date): string => {
-    const y = date.getFullYear();
-    const m = String(date.getMonth() + 1).padStart(2, '0');
-    const d = String(date.getDate()).padStart(2, '0');
-    return `${y}-${m}-${d}`;
-  };
-
-  const formatDateJa = (dateStr: string): string => {
-    if (!dateStr) return '';
-    const d = new Date(dateStr + 'T00:00:00');
-    const weekdays = ['日', '月', '火', '水', '木', '金', '土'];
-    return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日(${weekdays[d.getDay()]})`;
-  };
 
   // ── ナビゲーション ──
   const handlePrevMonth = () => {
     const prev = new Date(calendarDate.getFullYear(), calendarDate.getMonth() - 1, 1);
+    if (maxPastDate && new Date(prev.getFullYear(), prev.getMonth() + 1, 0) < maxPastDate) return;
     setCalendarDate(prev);
     fetchMoreIfNeeded(prev);
   };
@@ -149,8 +162,9 @@ export default function ReservationApp({
     setTimelineDate(prev => {
       const d = new Date(prev + 'T00:00:00');
       d.setDate(d.getDate() - 1);
+      if (maxPastDate && d < maxPastDate) return prev;
       fetchMoreIfNeeded(d);
-      return toLocalDate(d);
+      return toDateStr(d);
     });
   };
 
@@ -161,7 +175,7 @@ export default function ReservationApp({
       // 管理者以外: maxFutureDate を超えた日には移動しない
       if (maxFutureDate && d > maxFutureDate) return prev;
       fetchMoreIfNeeded(d);
-      return toLocalDate(d);
+      return toDateStr(d);
     });
   };
 
@@ -170,7 +184,7 @@ export default function ReservationApp({
   /** タイムラインの空きセルクリック → 新規予約モーダルを開く */
   const handleFacilityClick = (facilityId: string, time: string) => {
     const [h, m] = time.split(':').map(Number);
-    const totalEndMin = h * 60 + m + appSettings.min_reservation_minutes;
+    const totalEndMin = h * 60 + m + 30; // 固定で30分とする
     const endHour = Math.floor(totalEndMin / 60);
     const endMin = totalEndMin % 60;
     const endTime = `${String(endHour).padStart(2, '0')}:${String(endMin).padStart(2, '0')}`;
@@ -222,56 +236,6 @@ export default function ReservationApp({
         original_end_time: reservation.end_time,
       },
     });
-  };
-
-  /** 予約データの保存 */
-  const handleSaveReservation = async (data: any) => {
-    const method = data.id ? 'PUT' : 'POST';
-    const payload = {
-      ...data,
-      start_time: `${data.date}T${data.start_time}:00`,
-      end_time: `${data.date}T${data.end_time}:00`,
-    };
-    delete payload.date;
-
-    const response = await fetch('/api/reserve', {
-      method,
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      throw new Error(errorData.error || '予約の保存に失敗しました。');
-    }
-  };
-
-  /** 予約データの削除 */
-  const handleDeleteReservation = async (id: string) => {
-    const response = await fetch('/api/reserve', {
-      method: 'DELETE',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id }),
-    });
-
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      throw new Error(errorData.error || '予約の削除に失敗しました。');
-    }
-  };
-
-  /** 予約の承認/却下（管理者のみ） */
-  const handleApproveReservation = async (id: string, status: 'approved' | 'rejected') => {
-    const response = await fetch('/api/approve', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id, status }),
-    });
-
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      throw new Error(errorData.error || '操作に失敗しました。');
-    }
   };
 
   return (
@@ -350,11 +314,13 @@ export default function ReservationApp({
             reservations={monthReservations}
             currentMember={currentMember}
             maxFutureDate={maxFutureDate}
+            maxPastDate={maxPastDate}
           />
         ) : (
           <TimelineView
             timelineDate={timelineDate}
-            facilities={initialFacilities}
+            facilities={facilities}
+
             reservations={dayReservations}
             currentMember={currentMember}
             startHour={appSettings.start_hour}
@@ -366,20 +332,24 @@ export default function ReservationApp({
       </div>
 
       {/* ── 予約モーダル ── */}
-      <ReservationModal
-        isOpen={modalState.isOpen}
-        mode={modalState.mode}
-        initialData={modalState.initialData}
-        facilities={activeFacilities}
-        members={initialMembers}
-        currentMember={currentMember}
-        appSettings={appSettings}
-        onClose={() => setModalState(prev => ({ ...prev, isOpen: false }))}
-        onSave={handleSaveReservation}
-        onDelete={handleDeleteReservation}
-        onApprove={(id) => handleApproveReservation(id, 'approved')}
-        onReject={(id) => handleApproveReservation(id, 'rejected')}
-      />
+      {modalState.isOpen && (
+        <ReservationModal
+          isOpen={modalState.isOpen}
+          mode={modalState.mode}
+          initialData={modalState.initialData}
+          facilities={activeFacilities}
+          members={members as any}
+          currentMember={currentMember}
+          appSettings={appSettings}
+          allReservations={reservations}
+          onClose={() => setModalState(prev => ({ ...prev, isOpen: false }))}
+          onSave={saveReservation}
+          onDelete={deleteReservation}
+          onApprove={(id) => updateReservationStatus(id, 'approved')}
+          onReject={(id) => updateReservationStatus(id, 'rejected')}
+        />
+      )}
     </div>
+
   );
 }

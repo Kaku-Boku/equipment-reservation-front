@@ -13,10 +13,10 @@
  */
 import Layout from "../layouts/Layout.astro";
 import { SUPABASE_CONFIG } from "../lib/supabase";
-import ReservationApp from "../components/ReservationApp";
+import ReservationApp from "../components/reservation/ReservationApp";
 import { DEFAULT_APP_SETTINGS } from "../lib/types";
 
-const { supabase, member } = Astro.locals;
+const { supabase, member, session } = Astro.locals;
 const isAdmin = member?.role === 'admin';
 
 console.log('[index.astro] Page started. Member:', member?.name, 'isAdmin:', isAdmin);
@@ -86,18 +86,11 @@ const { data: facilities } = await supabase
   .order("name");
 
 // メンバー一覧（参加者選択用）
-const { data: members, error: membersError } = await supabase
+const { data: members } = await supabase
   .from("members")
   .select("id, name, email")
   .eq("status", "active")
   .order("name");
-
-console.log('[index.astro] Data fetch complete:', {
-  reservationsCount: initialReservations?.length || 0,
-  facilitiesCount: facilities?.length || 0,
-  membersCount: members?.length || 0,
-  hasErrors: Boolean(membersError),
-});
 ---
 
 <Layout title="設備予約">
@@ -111,6 +104,9 @@ console.log('[index.astro] Data fetch complete:', {
     currentMember={member}
     supabaseUrl={SUPABASE_CONFIG.url}
     supabaseKey={SUPABASE_CONFIG.anonKey}
+    accessToken={session?.access_token || ''}
     appSettings={appSettings}
   />
+
+
 </Layout>

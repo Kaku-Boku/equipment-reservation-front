@@ -3,39 +3,37 @@
  *
  * GET: app_settings を取得
  * PUT: app_settings を更新
+ *
+ * Note: ミドルウェアで /api/admin/* を管理者のみに制限しているが、
+ *       防御的プログラミングとして各ルート内でも権限チェックを行う。
  */
 import type { APIRoute } from 'astro';
-
-const JSON_HEADERS = { 'Content-Type': 'application/json' } as const;
+import { JSON_HEADERS, checkAdmin, errorResponse } from '../../../lib/api-utils';
+import { logger } from '../../../lib/logger';
 
 export const GET: APIRoute = async ({ locals }) => {
-  const { session, member, supabase } = locals;
-
-  if (!session || !member) {
-    return new Response(JSON.stringify({ error: '認証が必要です。' }), { status: 401, headers: JSON_HEADERS });
-  }
-  if (member.role !== 'admin') {
-    return new Response(JSON.stringify({ error: '管理者のみアクセスできます。' }), { status: 403, headers: JSON_HEADERS });
+  const check = checkAdmin(locals);
+  if (!check.ok) {
+    return new Response(JSON.stringify({ error: check.message }), { status: check.status, headers: JSON_HEADERS });
   }
 
+  const { supabase } = locals;
   const { data, error } = await supabase.from('app_settings').select('*').single();
   if (error) {
-    console.error('[api/admin/settings GET] エラー:', error);
-    return new Response(JSON.stringify({ error: '設定の取得に失敗しました。' }), { status: 500, headers: JSON_HEADERS });
+    logger.error('[api/admin/settings GET] エラー:', error);
+    return errorResponse('設定の取得に失敗しました。');
   }
 
   return new Response(JSON.stringify({ settings: data }), { status: 200, headers: JSON_HEADERS });
 };
 
 export const PUT: APIRoute = async ({ request, locals }) => {
-  const { session, member, supabase } = locals;
+  const check = checkAdmin(locals);
+  if (!check.ok) {
+    return new Response(JSON.stringify({ error: check.message }), { status: check.status, headers: JSON_HEADERS });
+  }
 
-  if (!session || !member) {
-    return new Response(JSON.stringify({ error: '認証が必要です。' }), { status: 401, headers: JSON_HEADERS });
-  }
-  if (member.role !== 'admin') {
-    return new Response(JSON.stringify({ error: '管理者のみ更新できます。' }), { status: 403, headers: JSON_HEADERS });
-  }
+  const { supabase, member } = locals;
 
   try {
     const body = await request.json();
@@ -78,14 +76,14 @@ export const PUT: APIRoute = async ({ request, locals }) => {
       .eq('id', 1);
 
     if (error) {
-      console.error('[api/admin/settings PUT] エラー:', error);
-      return new Response(JSON.stringify({ error: '設定の更新に失敗しました。' }), { status: 500, headers: JSON_HEADERS });
+      logger.error('[api/admin/settings PUT] エラー:', error);
+      return errorResponse('設定の更新に失敗しました。');
     }
 
-    console.log('[api/admin/settings PUT] 設定を更新しました（by', member.email, ')');
+    logger.info('[api/admin/settings PUT] 設定を更新しました（by', member!.email, ')');
     return new Response(JSON.stringify({ ok: true }), { status: 200, headers: JSON_HEADERS });
   } catch (err) {
-    console.error('[api/admin/settings PUT] 予期せぬエラー:', err);
-    return new Response(JSON.stringify({ error: 'サーバーエラーが発生しました。' }), { status: 500, headers: JSON_HEADERS });
+    logger.error('[api/admin/settings PUT] 予期せぬエラー:', err);
+    return errorResponse('サーバーエラーが発生しました。');
   }
 };
