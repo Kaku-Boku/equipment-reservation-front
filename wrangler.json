@@ -1,5 +1,5 @@
 {
-  "name": "equipment-reservation",
+  "name": "equipment-reservation-front",
   "compatibility_date": "2026-04-18",
   "compatibility_flags": [
     "nodejs_compat"
